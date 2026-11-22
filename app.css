@@ -160,3 +160,7 @@ details>.card{border-top:1px solid var(--line);margin-bottom:0}
   .bars{grid-template-columns:minmax(80px,max-content) 1fr max-content;font-size:13px}
 }
 @media print{.tabs,.drop,.tip,#tipbox{display:none}body{background:#fff}.card,.kpi,.lead{break-inside:avoid}}
+
+/* ตารางค่าใช้จ่ายตามกลุ่มหลัก */
+tr.grp td{font-weight:600;color:#0e5e6f;background:#eef7f8}
+td.ind{padding-left:22px}

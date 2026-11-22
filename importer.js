@@ -33,7 +33,8 @@
     const cCh = ix['ช่องทางการขาย'];
     // คอลัมน์จับคู่ช่องทางที่ลูกค้าเพิ่มเอง: ชื่อ "ช่องทาง" หรือคอลัมน์ไม่มีหัวถัดจาก "ช่องทางการขาย"
     const cMap = ix['ช่องทาง'] != null ? ix['ช่องทาง'] : (str(H[cCh + 1]) === '' ? cCh + 1 : null);
-    const docs = new Map(); const learned = {}; let cancelled = 0, noSku = 0; const valueByMonth = {};
+    const cShip = H.findIndex(h => /^ค่าส่ง/.test(str(h)));   // ค่าส่งที่เรียกเก็บจากลูกค้า (รวมอยู่ในยอดหัวบิล)
+    const docs = new Map(); const learned = {}; let cancelled = 0, noSku = 0; const valueByMonth = {}; const cancelledDocs = [];
     for (let i = hi + 1; i < rows.length; i++) {
       const r = rows[i]; if (!r || isFooter(r)) continue;
       const no = str(r[ix['รายการ']]); if (!no) continue;
@@ -41,32 +42,38 @@
       if (!d) {
         d = { no, date: toDate(r[ix['วันที่ทำรายการ']]), rawChannel: str(r[cCh]), mapped: cMap != null ? str(r[cMap]) : '',
           status: str(r[ix['สถานะรายการ']]), customer: str(r[ix['ชื่อลูกค้า']]), note: str(r[ix['หมายเหตุ']]),
-          preVat: num(r[ix['มูลค่ารวมก่อนภาษี']]), value: num(r[ix['มูลค่า']]), payDate: toDate(r[ix['วันที่ชำระเงิน']]), lines: [] };
+          preVat: num(r[ix['มูลค่ารวมก่อนภาษี']]), value: num(r[ix['มูลค่า']]), payDate: toDate(r[ix['วันที่ชำระเงิน']]), lines: [],
+          ship: cShip >= 0 ? num(r[cShip]) : 0, vat: num(r[ix['ภาษีมูลค่าเพิ่ม']]), disc: num(r[ix['ส่วนลด']]) };
         docs.set(no, d);
         if (d.mapped) learned[d.rawChannel || '(ไม่ระบุ)'] = d.mapped;
       }
       const sku = str(r[ix['รหัสสินค้า']]);
       if (!sku) {
-        // บรรทัดไม่มีรหัสสินค้าแต่มียอด (เช่น ค่าขนส่งที่เก็บจากลูกค้า) นับเป็นรายได้ ไม่มีต้นทุนสินค้า
+        // บรรทัดไม่มีรหัสสินค้า: ถ้ามียอด (เช่น ค่าขนส่ง) นับเป็นรายได้ ถ้าไม่มียอด (ของแถม) เก็บไว้ให้เห็นครบตามไฟล์ดิบ ทั้งสองแบบไม่มีต้นทุนสินค้า
         noSku++;
-        if (num(r[ix['ราคารวม']])) d.lines.push({ sku: '(ไม่มีรหัสสินค้า)', name: str(r[ix['ชื่อสินค้า']]), qty: 0, price: 0, total: num(r[ix['ราคารวม']]) });
+        const nm = str(r[ix['ชื่อสินค้า']]), dq = num(r[ix['จำนวน']]), tt = num(r[ix['ราคารวม']]);
+        if (tt || nm || dq) d.lines.push({ sku: '(ไม่มีรหัสสินค้า)', name: nm || (tt ? '' : 'ของแถม / ไม่ระบุสินค้า'), qty: 0, docQty: dq, price: 0, total: tt });
         continue;
       }
       d.lines.push({ sku, name: str(r[ix['ชื่อสินค้า']]), qty: num(r[ix['จำนวน']]), price: num(r[ix['ราคาต่อหน่วย']]), total: num(r[ix['ราคารวม']]) });
     }
     const out = [];
     docs.forEach(d => {
-      if (d.status === 'ถูกยกเลิก') { cancelled++; return; }
+      const month = monthKey(d.date);
+      if (d.status === 'ถูกยกเลิก') { cancelled++; cancelledDocs.push({ doc: d.no, month, rawChannel: d.rawChannel || '(ไม่ระบุ)', preVat: d.preVat }); return; }
       const sum = d.lines.reduce((s, l) => s + l.total, 0), q = d.lines.reduce((s, l) => s + l.qty, 0);
+      // ค่าส่งที่เรียกเก็บจากลูกค้า: แยกออกจากค่าสินค้าเป็นรายได้ค่าขนส่ง (แยกเมื่อ ค่าสินค้า − ส่วนลด + ค่าส่ง = ยอดหัวบิล เท่านั้น)
+      let ship = d.ship > 0 ? (d.vat > 0 && d.value > 0 ? d.ship * d.preVat / d.value : d.ship) : 0;
+      if (!(ship > 0 && sum > 0 && ship < d.preVat && Math.abs(sum - d.disc + ship - d.preVat) < 1)) ship = 0;
       // บิลที่บรรทัดสินค้าไม่มีราคาแต่หัวบิลมียอด กระจายยอดหัวบิลตามจำนวน
       if (!sum && d.preVat && q) d.lines.forEach(l => { l.total = d.preVat * l.qty / q; });
-      const f = sum ? d.preVat / sum : (d.preVat && q ? 1 : 0); // ปรับเป็นยอดก่อน VAT และกระจายส่วนลดท้ายบิล
-      const month = monthKey(d.date);
+      const f = sum ? (d.preVat - ship) / sum : (d.preVat && q ? 1 : 0); // ปรับเป็นยอดก่อน VAT และกระจายส่วนลดท้ายบิล
       valueByMonth[month] = (valueByMonth[month] || 0) + d.value;
+      if (ship) d.lines.push({ sku: '(ค่าส่ง)', name: 'ค่าขนส่งที่เรียกเก็บจากลูกค้า', qty: 0, docQty: 0, price: 0, total: ship / (f || 1) });
       d.lines.forEach((l, li) => out.push({ kind, doc: d.no, date: d.date, month, first: li === 0, value: d.value, payDate: d.payDate, rawChannel: d.rawChannel || '(ไม่ระบุ)',
-        customer: d.customer, note: d.note, sku: l.sku, name: l.name, qty: l.qty, price: l.price, revenue: l.total * f }));
+        customer: d.customer, note: d.note, sku: l.sku, name: l.name, qty: l.qty, docQty: l.docQty != null ? l.docQty : l.qty, price: l.price, revenue: l.total * f }));
     });
-    return { lines: out, learned, valueByMonth, cancelled, hasMap: cMap != null && Object.keys(learned).length > 0,
+    return { lines: out, learned, valueByMonth, cancelled, cancelledDocs, hasMap: cMap != null && Object.keys(learned).length > 0,
       info: `${docs.size} เอกสาร ${out.length} บรรทัด` + (cancelled ? ` · ตัดรายการยกเลิก ${cancelled}` : '') + (noSku ? ` · ไม่มีรหัสสินค้า ${noSku} แถว` : '') };
   }
 
@@ -107,11 +114,17 @@
   function parsePurchases(rows, hi) {
     const ix = colIndex(rows[hi]); const docs = new Map();
     for (let i = hi + 1; i < rows.length; i++) {
-      const r = rows[i]; if (!r || isFooter(r)) continue; const no = str(r[ix['รายการ']]); if (!no || docs.has(no)) continue;
-      const date = toDate(r[ix['วันที่ทำรายการ']]);
-      docs.set(no, { doc: no, date, month: monthKey(date), contact: str(r[ix['ชื่อผู้ติดต่อ']]), value: num(r[ix['มูลค่า']]), payDate: toDate(r[ix['วันที่ชำระเงิน']]), payStatus: str(r[ix['สถานะการชำระเงิน']]) });
+      const r = rows[i]; if (!r || isFooter(r)) continue; const no = str(r[ix['รายการ']]); if (!no) continue;
+      let d = docs.get(no);
+      if (!d) {
+        const date = toDate(r[ix['วันที่ทำรายการ']]);
+        d = { doc: no, date, month: monthKey(date), contact: str(r[ix['ชื่อผู้ติดต่อ']]), value: num(r[ix['มูลค่า']]), preVat: num(r[ix['มูลค่ารวมก่อนภาษี']]), payDate: toDate(r[ix['วันที่ชำระเงิน']]), payStatus: str(r[ix['สถานะการชำระเงิน']]), items: [] };
+        docs.set(no, d);
+      }
+      const sku = str(r[ix['รหัสสินค้า']]), nm = str(r[ix['ชื่อสินค้า']]);
+      if (sku || nm) d.items.push({ sku, name: nm, qty: num(r[ix['จำนวน']]), total: num(r[ix['ราคารวม']]) });
     }
-    return { lines: [...docs.values()], info: `${docs.size} ใบซื้อ · ใช้ในหน้าเงินสด` };
+    return { lines: [...docs.values()], info: `${docs.size} ใบซื้อ · ใช้ในหน้าเงินสดและคำนวณต้นทุน` };
   }
 
   function parseStock(rows, hi, sheetName) {
@@ -143,13 +156,28 @@
     return yy + '-' + String(mon + 1).padStart(2, '0');
   }
   function parseCost(rows, hi) {
-    const ix = colIndex(rows[hi]); const out = []; const c = ix['ต้นทุนถัวเฉลี่ย/หน่วย'];
+    const ix = colIndex(rows[hi]); const out = []; const c = ix['ต้นทุนถัวเฉลี่ย/หน่วย']; const g = k => ix[k] != null ? num(rows.cur[ix[k]]) : 0;
     for (let i = hi + 1; i < rows.length; i++) {
       const r = rows[i]; if (!r) continue; const sku = str(r[ix['SKU']]), month = periodMonth(r[ix['งวด']]);
-      if (sku && month && num(r[c]) > 0) out.push({ month, sku, cost: num(r[c]) });
+      if (!sku || !month) continue; rows.cur = r;
+      // เก็บทุกคอลัมน์ของตารางสำนักงานไว้ทำ Tab กระทบต้นทุน · งวดที่เป็นช่วงหลายเดือน (เช่น ม.ค.-มิ.ย.) ถือเป็นงวดสะสม
+      out.push({ month, sku, cost: num(r[c]), name: str(r[ix['ชื่อสินค้า']]), cum: !(r[ix['งวด']] instanceof Date) && /-/.test(str(r[ix['งวด']])), label: r[ix['งวด']] instanceof Date ? '' : str(r[ix['งวด']]),
+        openQty: g('จำนวนต้นงวด'), openVal: g('มูลค่าต้นงวด'), buyQty: g('จำนวนซื้อเข้า'), buyVal: g('มูลค่าซื้อ'), alloc: g('ค่าใช้จ่ายจัดสรร'), closeQty: g('จำนวนปลายงวด'), closeVal: g('มูลค่าปลายงวด'), soldQty: g('จำนวนขาย/ปรับปรุง'), cogs: g('ต้นทุนขาย') });
     }
     const ms = [...new Set(out.map(l => l.month))].sort();
     return { lines: out, info: `${out.length} บรรทัด · งวด ${ms.join(', ')}` };
+  }
+
+  // รายงานสินค้าเคลื่อนไหวของเดือน: ใช้จำนวนคงเหลือสิ้นเดือนเป็นจำนวนปลายงวดในการคำนวณต้นทุน
+  function parseMovement(rows, hi) {
+    const ix = colIndex(rows[hi]); const out = []; let month = '';
+    const t = rows.slice(0, hi).map(r => (r || []).map(str).join(' ')).join(' ').match(/-\s*\d{1,2}\/(\d{1,2})\/(\d{4})/);
+    if (t) { let y = +t[2]; if (y > 2400) y -= 543; month = y + '-' + String(+t[1]).padStart(2, '0'); }
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r || isFooter(r)) continue; const sku = str(r[ix['รหัสสินค้า']]), name = str(r[ix['ชื่อสินค้า']]); if (!sku && !name) continue;
+      out.push({ sku, name, inQty: num(r[ix['เข้า']]), outQty: num(r[ix['ออก']]), close: num(r[ix['คงเหลือ']]) });
+    }
+    return { lines: out, month, info: `${out.length} สินค้า` + (month ? ` · สิ้นเดือน ${month}` : ' · ไม่พบช่วงวันที่ของรายงาน') };
   }
 
   function parseSalesSummary(rows, hi) {
@@ -218,7 +246,8 @@
       const hi = findHeader(rows); if (hi < 0) return;
       const hs = rows[hi].map(str); const has = k => hs.includes(k);
       const P = (o, parsed) => { const p = Object.assign({ name: name + ' › ' + sn, file: name, used: false, info: '' }, o, parsed || {}); if (fixed) p.info += ' · หัวไฟล์เสีย ซ่อมตอนอ่านแล้ว'; parts.push(p); };
-      if (has('รหัสสินค้า') && has('ช่องทางการขาย') && has('รายการ')) {
+      if (has('รหัสสินค้า') && has('เข้า') && has('ออก') && has('คงเหลือ')) P({ kind: 'movement', label: 'สินค้าเคลื่อนไหว (จำนวนปลายงวด)', used: true }, parseMovement(rows, hi));
+      else if (has('รหัสสินค้า') && has('ช่องทางการขาย') && has('รายการ')) {
         const ret = /รับคืน/.test(sn);
         P({ kind: ret ? 'returns' : 'sales', label: ret ? 'รับคืนสินค้า' : 'รายการขาย (รายบรรทัด)', used: true }, parseSales(rows, hi, ret ? 'return' : 'sale'));
       } else if (has('ชื่อรายการ') && has('หมวดหมู่') && has('ราคารวม')) P({ kind: 'expenses', label: 'รายจ่ายอื่น', used: true }, parseExpenses(rows, hi));

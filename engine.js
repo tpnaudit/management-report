@@ -14,12 +14,57 @@
     adjustments: [],           // { month, channel, label, amount, nature, reason }
     promoRounds: [],           // บิลค่าโปร 1 แถม 1 ที่กรอกเอง { month, label, amount }
     cjCreditDays: 60, cashOpen: 0, cjNewPrice: 0, present: false, promoInst: 1,
+    channelRules: [],          // กฎช่องทางตามชื่อลูกค้า { raw, customer, to } เช่น ช่องทาง "เคลมสินค้า" ที่ลูกค้าเป็นคู่ค้ารายใหญ่ → ช่องทางของคู่ค้านั้น
+    noCJ: [],                  // คำในชื่อรายการ/หมวด ของค่าใช้จ่ายส่วนกลางที่ไม่ปันให้ CJ (ปันเฉพาะช่องทางอื่น)
+    excludeWords: [],          // คำในชื่อรายการ/หมวด ที่ไม่นับในกำไรขาดทุน
+    catGroup: {},              // หมวดในไฟล์ → "กลุ่มหลัก|หมวดย่อย" ที่ตั้งเอง
+    purchaseFeeSkus: [],       // รหัสในใบซื้อที่เป็นค่าธรรมเนียม ไม่ใช่สินค้า (นำไปปันเข้าต้นทุนสินค้าในใบเดียวกัน)
+    rev: 0,
     fc: {}                     // สมมติฐานประมาณการเงินสดที่แก้เอง { open, cjSales, otherSales, buy, exp, promo }
   };
 
   const FIX_RE = /เงินเดือน|ประกันสังคม|ค่าเช่า|ทำบัญชี|ซอร์ฟแวร์|ซอฟต์แวร์|โทรศัพท์|อินเตอร์เน็ต|อุปกรณ์สำนักงาน|ซ่อม|เดินทาง|อบรม|การตลาด|เบ็ดเตล็ด|เครื่องจักร|ส่งเสริมการขาย|ไฟฟ้า|ประกัน|ยานพาหนะ|รับรอง/;
   const EX_RE = /ภาษี|สินทรัพย์/;
   const guessNature = cat => EX_RE.test(cat) ? 'ex' : FIX_RE.test(cat) ? 'fix' : 'var';
+
+  // กลุ่มค่าใช้จ่ายหลัก (เรียงตามที่ใช้ในรายงาน) และกฎจัดหมวดย่อยจากชื่อหมวด/ชื่อรายการ
+  const G_COST = 'ต้นทุนและคลังสินค้า', G_SELL = 'ค่าใช้จ่ายในการขาย', G_STAFF = 'ค่าใช้จ่ายพนักงาน', G_ADMIN = 'ค่าใช้จ่ายบริหาร', G_EX = 'ไม่นับในกำไรขาดทุน';
+  const GROUPS = [G_COST, G_SELL, G_STAFF, G_ADMIN, G_EX];
+  const OTHER_SUB = 'ค่าใช้จ่ายเบ็ดเตล็ด', SHIP_SUB = 'ค่าขนส่งสินค้า (ส่วนกลาง)', SHIP_CJ = 'ค่าขนส่งและกระจายสินค้าให้ CJ', SHIP_OTHER = 'ค่าขนส่งถึงลูกค้าช่องทางอื่น';
+  const SUB_RULES = [
+    [G_SELL, 'ค่าโปรและส่วนลดของคู่ค้า', /1\s*แถม\s*1|BOGO|ร่วมโปร|จัดโปร|ส่วนลดหน้าร้าน|premium/i],
+    [G_SELL, 'ค่าสนับสนุนตามสัญญาคู่ค้า', /งบสนับสนุน|สาขาใหม่|commercial/i],
+    [G_SELL, 'ค่าปรับและค่าชดเชย', /ค่าปรับ|ชดเชย/],
+    [G_ADMIN, 'ค่าไปรษณีย์และส่งเอกสาร', /ไปรษณีย์/],
+    [G_SELL, SHIP_SUB, /ขนส่ง|J&T|ลงสินค้า|ค่าตัก|กระจายสินค้า|DC\s*fee|น้ำมัน/i],
+    [G_SELL, 'การตลาดและโฆษณา', /โฆษณา|การตลาด|marketing|\bads\b|คลิป|ไลฟ์|ออกบูธ|ไวนิล|ออกแบบ|ส่งเสริมการขาย|ของแถม|ตัวอย่าง|influencer|รีวิว|boost|meta/i],
+    [G_SELL, 'ค่าคอมมิชชั่นและค่าธรรมเนียมการขาย', /คอมมิชชั่น|ค่าธรรมเนียม/],
+    [G_COST, 'ค่าบรรจุภัณฑ์', /บรรจุภัณฑ์|packag/i],
+    [G_COST, 'ค่าเช่าและค่าใช้จ่ายโกดัง', /โกดัง|คลังสินค้า/],
+    [G_COST, 'ค่าทดสอบคุณภาพสินค้า', /ทดสอบคุณภาพ|ตรวจแลป/],
+    [G_STAFF, 'เงินเดือนกรรมการ', /เงินเดือนกรรมการ/],
+    [G_STAFF, 'เงินเดือนและค่าจ้าง', /เงินเดือน|ค่าจ้าง|รายวัน|เบี้ยเลี้ยง|โบนัส/],
+    [G_STAFF, 'สวัสดิการและอบรม', /สวัสดิการ|อบรม/],
+    [G_ADMIN, 'ค่าซอฟต์แวร์และระบบ', /ระบบ|ซอร์ฟแวร์|ซอฟต์แวร์|software/i],
+    [G_ADMIN, 'ค่าทำบัญชีและที่ปรึกษา', /บัญชี|ที่ปรึกษา|กฎหมาย/],
+    [G_ADMIN, 'ค่าโทรศัพท์และอินเทอร์เน็ต', /โทรศัพท์|อินเตอร์เน็ต|อินเทอร์เน็ต/],
+    [G_ADMIN, 'ค่าน้ำค่าไฟ', /ค่าไฟ|ไฟฟ้า|ประปา/],
+    [G_ADMIN, 'ค่าเดินทาง', /เดินทาง|ทางด่วน|ที่พัก/],
+    [G_ADMIN, 'ผ่อนชำระรถและเครื่องจักร', /ผ่อน|เครื่องจักร|โฟคลิฟ/],
+    [G_ADMIN, 'ค่าซ่อมแซมและยานพาหนะ', /ซ่อม|รถยนต์|vehicle|ประกันรถ/i],
+    [G_ADMIN, 'วัสดุและอุปกรณ์สำนักงาน', /อุปกรณ์|office supplies|ทำความสะอาด/i],
+    [G_ADMIN, 'ค่าธรรมเนียมและจดทะเบียน', /จดแบรนด์|ขอเอกสาร|จดทะเบียน|หนังสือรับรอง/]
+  ];
+  // จัดจากชื่อหมวดก่อน ถ้าไม่เข้ากฎใดจึงดูชื่อรายการ
+  function groupOf(category, name, nature, cfg, channel) {
+    if (nature === 'ex') return { main: G_EX, sub: /สินทรัพย์/.test(category) ? 'ซื้อสินทรัพย์' : /ประกันสังคม/.test(category + name) ? 'เงินสมทบประกันสังคม' : 'ภาษี' };
+    const own = cfg.catGroup && cfg.catGroup[category];
+    if (own && own.indexOf('|') > 0) return { main: own.split('|')[0], sub: own.split('|')[1] };
+    const hit = t => SUB_RULES.find(r => r[2].test(t));
+    const r = hit(category || '') || hit(name || '');
+    if (r && r[1] === SHIP_SUB) return { main: r[0], sub: channel === 'CJ' ? SHIP_CJ : channel && channel !== SHARED ? SHIP_OTHER : SHIP_SUB };
+    return r ? { main: r[0], sub: r[1] } : { main: G_ADMIN, sub: OTHER_SUB };
+  }
 
   // ประเภทรายการหักของ CJ
   const CJ_TYPES = { promoBill: 'ค่าโปร 1 แถม 1 (บิล CJ)', promoAccrual: 'ค่าร่วมโปร (ตั้งประมาณการ)', promo: 'ค่าโปรและส่วนลดอื่น', dc: 'DC fee', cs: 'งบสนับสนุน (Commercial support)', ns: 'ค่าสนับสนุนสาขาใหม่', logistics: 'ขนส่งและค่าลงสินค้า', penalty: 'ค่าปรับ', other: 'อื่น ๆ' };
@@ -59,7 +104,10 @@
       });
       return out;
     };
-    const saleLines = take('sales', l => l.doc, true).concat(take('returns', l => l.doc, true));
+    // เอกสารที่ถูกยกเลิกในไฟล์รุ่นใดรุ่นหนึ่ง ถือว่ายกเลิก (ไฟล์ที่ export ทีหลังอาจยกเลิกเพิ่มจากไฟล์ที่ลูกค้าส่งมาก่อน)
+    const cancelMap = new Map();
+    order('sales').forEach(f => (f.cancelledDocs || []).forEach(c => { if (!cancelMap.has(c.doc)) cancelMap.set(c.doc, Object.assign({ file: f.name }, c)); }));
+    const saleLines = take('sales', l => l.doc, true).filter(l => !cancelMap.has(l.doc)).concat(take('returns', l => l.doc, true));
     const expLines = take('expenses', l => l.month + '|' + l.name + '|' + l.amount.toFixed(2));
     const ordLines = take('orderExp', l => l.doc + '|' + l.name + '|' + l.amount.toFixed(2));
     const purchases = take('purchases', l => l.doc, true);
@@ -73,19 +121,54 @@
     const mi = m => +m.slice(0, 4) * 12 + +m.slice(5);
     const snapFor = month => { if (!snapMonths.length) return {}; const d = m => /^\d{4}-\d{2}$/.test(m) ? Math.abs(mi(m) - mi(month)) : 99; return snaps[snapMonths.slice().sort((a, b) => d(a) - d(b))[0]]; };
     // ต้นทุน: (1) ที่แก้เอง (2) ตารางต้นทุนถัวเฉลี่ยรายงวดของสำนักงาน (3) ต้นทุนในไฟล์สต๊อกของโปรแกรมขาย
-    const costTab = {}; live('costTable').forEach(f => f.lines.forEach(l => { (costTab[l.month] || (costTab[l.month] = {}))[l.sku] = l.cost; }));
+    const costTab = {}, recon = {}, office = {};
+    live('costTable').forEach(f => f.lines.forEach(l => {
+      office[l.month] = 1; if (l.cost > 0) (costTab[l.month] || (costTab[l.month] = {}))[l.sku] = l.cost;
+      if (l.openQty != null) (recon[l.month] || (recon[l.month] = {}))[l.sku] = Object.assign({ src: 'office', file: f.name }, l);
+    }));
+    // รายการซื้อรายบรรทัด: มูลค่าหลังส่วนลดท้ายใบ + ค่าใช้จ่ายนำเข้าของใบนั้นปันตามมูลค่าสินค้า (วิธีเดียวกับ Purchase Report ของสำนักงาน)
+    const feeSkus = cfg.purchaseFeeSkus || [], buyLines = [];
+    purchases.forEach(p => {
+      if (!p.items || !p.items.length) return;
+      const goods = p.items.filter(i => !feeSkus.includes(i.sku)), fee = p.items.filter(i => feeSkus.includes(i.sku)).reduce((t, i) => t + i.total, 0);
+      const gsum = goods.reduce((t, i) => t + i.total, 0), f = gsum && p.preVat ? (p.preVat - fee) / gsum : 1;
+      const exp = fee + purchaseExp.filter(x => x.doc === p.doc).reduce((t, x) => t + x.amount, 0);
+      goods.forEach(i => buyLines.push({ month: p.month, doc: p.doc, sku: i.sku || i.name, name: i.name, qty: i.qty, val: i.total * f, alloc: gsum ? exp * i.total / gsum : 0, file: p.file }));
+    });
+    // เดือนที่สำนักงานยังไม่ได้ทำตารางต้นทุน แต่มีรายงานสินค้าเคลื่อนไหว: คำนวณต้นทุนถัวเฉลี่ยของงวดเอง
+    // ยอดยกมา (ปลายงวดก่อน) + ซื้อเข้ารวมค่าใช้จ่าย = พร้อมขาย → ต้นทุนถัวเฉลี่ย → หักคงเหลือสิ้นเดือน = จำนวนขาย/ปรับปรุง
+    const mv = {}; live('movement').forEach(f => { if (!f.month) return; mv[f.month] = mv[f.month] || { file: f.name, rows: {} }; f.lines.forEach(l => { mv[f.month].rows[l.sku || l.name] = l; }); });
+    const prevM = m => { const d = new Date(+m.slice(0, 4), +m.slice(5) - 2, 15); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+    Object.keys(mv).sort().forEach(m => {
+      const prev = recon[prevM(m)]; if (office[m] || !prev) return;
+      const buy = {}; buyLines.filter(b => b.month === m).forEach(b => { const x = buy[b.sku] || (buy[b.sku] = { qty: 0, val: 0, alloc: 0, name: b.name }); x.qty += b.qty; x.val += b.val; x.alloc += b.alloc; });
+      const keys = [...new Set(Object.keys(prev).filter(k => prev[k].closeQty || prev[k].cost).concat(Object.keys(buy), Object.keys(mv[m].rows)))].sort();
+      recon[m] = {}; costTab[m] = {};
+      keys.forEach(k => {
+        const p = prev[k], b = buy[k] || { qty: 0, val: 0, alloc: 0 }, w = mv[m].rows[k];
+        const openQty = p ? p.closeQty : 0, pc = p ? p.cost : 0, openVal = p ? (pc > 0 ? p.closeQty * pc : (p.closeVal || 0)) : 0;   // ยกมาด้วยต้นทุนถัวเฉลี่ยของงวดก่อน (วิธีเดียวกับตารางสำนักงาน)
+        const availQty = openQty + b.qty, availVal = openVal + b.val + b.alloc;
+        const cost = availQty > 0 && availVal > 0 ? availVal / availQty : pc;
+        const closeQty = w ? w.close : availQty, soldQty = availQty - closeQty;
+        recon[m][k] = { src: 'calc', month: m, sku: k, name: (w && w.name) || (p && p.name) || b.name || '', cost, prevCost: pc, openQty, openVal, buyQty: b.qty, buyVal: b.val, alloc: b.alloc, closeQty, closeVal: closeQty * cost, soldQty, cogs: soldQty * cost, noMove: !w, mvIn: w ? w.inQty : null, mvOut: w ? w.outQty : null, file: mv[m].file };
+        if (cost > 0) costTab[m][k] = cost;
+      });
+    });
     const costMonths = Object.keys(costTab).sort();
-    const costOf = (sku, month) => { if (cfg.cost[sku] != null && cfg.cost[sku] !== '') return +cfg.cost[sku]; if (costTab[month] && costTab[month][sku]) return costTab[month][sku]; const pm = costMonths.filter(x => x < month).pop(); if (pm && costTab[pm][sku]) return costTab[pm][sku]; const s = snapFor(month)[sku]; return s ? (s.cost || s.avgBuy || 0) : 0; };
+    const costOf = (sku, month) => { if (cfg.cost[sku] != null && cfg.cost[sku] !== '') return +cfg.cost[sku]; if (costTab[month] && costTab[month][sku]) return costTab[month][sku]; const pm = costMonths.filter(x => x < month && costTab[x][sku]).pop(); if (pm) return costTab[pm][sku]; const s = snapFor(month)[sku]; return s ? (s.cost || s.avgBuy || 0) : 0; };
 
     const unmappedCh = new Set(), noCost = {}, docIx = {}, sales = [], docs = [];
     saleLines.forEach(l => {
       if (!(l.rawChannel in cfg.channelMap)) unmappedCh.add(l.rawChannel);
-      const channel = cfg.channelMap[l.rawChannel] || l.rawChannel;
+      // กฎตามชื่อลูกค้า (เก็บผลไว้ที่บรรทัด เพราะชุดข้อมูลบนเว็บตัดชื่อลูกค้าออก)
+      if (l.customer) { const ru = (cfg.channelRules || []).find(x => (!x.raw || x.raw === l.rawChannel) && x.customer && l.customer.indexOf(x.customer) >= 0); l.ruleCh = ru ? ru.to : ''; }
+      const channel = l.ruleCh || cfg.channelMap[l.rawChannel] || l.rawChannel;
       const ret = l.kind === 'return';
-      // รับคืน: ลดยอดขายเสมอ แต่ลดจำนวน/ต้นทุนเฉพาะกรณี "ขาดส่ง" (ของไม่ได้ออกจริง) ของเสียหายทำลายยังเป็นต้นทุน
-      const qty = ret ? (/ขาดส่ง/.test(l.note) ? -l.qty : 0) : l.qty;
+      // รับคืน: ลดยอดขายเสมอ และลดจำนวน/ต้นทุนด้วย (ของกลับเข้าสต๊อกหรือไม่ได้ออกจริง) ยกเว้นของเสียหาย/ทำลายทิ้ง ซึ่งยังเป็นต้นทุนของบริษัท
+      const qty = ret ? (/เสียหาย|ทำลาย|ชำรุด/.test(l.note) ? 0 : -l.qty) : l.qty;
       const cost = costOf(l.sku, l.month); if (!cost && qty) (noCost[l.month] || (noCost[l.month] = new Set())).add(l.sku);
-      sales.push({ file: l.file, month: l.month, doc: l.doc, channel, sku: l.sku, name: l.name, qty, revenue: ret ? -l.revenue : l.revenue, cogs: qty * cost, ret });
+      const dq = l.docQty != null ? l.docQty : l.qty;
+      sales.push({ file: l.file, month: l.month, doc: l.doc, channel, sku: l.sku, name: l.name, qty, docQty: ret ? -dq : dq, revenue: ret ? -l.revenue : l.revenue, cogs: qty * cost, ret, note: ret ? l.note : '' });
       if (!ret) docIx[l.doc] = { channel, month: l.month };
       if (l.first && l.date) docs.push({ doc: l.doc, date: l.date, month: l.month, channel, value: ret ? -l.value : l.value, payDate: l.payDate, ret });
     });
@@ -96,13 +179,16 @@
       const channel = cfg.prefixMap[e.prefix] || SHARED;
       // ลักษณะต้นทุน: ที่ตั้งเอง > คอลัมน์ที่สำนักงานเติมในไฟล์ > รหัส FC (fixed cost) > เดาจากชื่อหมวด
       let nature = cfg.catNature[e.category] || e.hint || (e.prefix === 'FC' ? 'fix' : guessNature(e.category));
-      if (channel === EXCLUDE) nature = 'ex';
+      const text = e.category + ' ' + e.name;
+      if (channel === EXCLUDE || (!cfg.catNature[e.category] && (EX_RE.test(e.category) || (cfg.excludeWords || []).some(w => w && text.indexOf(w) >= 0)))) nature = 'ex';   // ภาษี สินทรัพย์ และคำที่ตั้งไว้ ไม่นับ แม้ไฟล์จะระบุลักษณะต้นทุนมา
+      const g = groupOf(e.category, e.name, nature, cfg, channel);
       expenses.push({ file: e.file, month: e.month, channel, nature, category: e.category, name: e.name, amount: e.amount, source: e.source, payDate: e.payDate, payStatus: e.payStatus,
+        main: g.main, sub: g.sub, pool: channel === SHARED ? ((cfg.noCJ || []).some(w => w && text.indexOf(w) >= 0) ? 'noCJ' : 'all') : '',
         cjType: channel === 'CJ' ? classifyCJ(e.name + ' ' + e.category) : '' });
     });
     ordLines.forEach(e => {
       const d = docIx[e.doc]; if (!d) { orphan.n++; orphan.amt += e.amount; return; }
-      expenses.push({ file: e.file, month: d.month, channel: d.channel, nature: 'var', category: 'ค่าขนส่ง (ผูกใบขาย)', name: e.name, amount: e.amount, source: 'ผูกใบขาย', cjType: d.channel === 'CJ' ? 'logistics' : '' });
+      expenses.push({ file: e.file, month: d.month, channel: d.channel, nature: 'var', category: 'ค่าขนส่ง (ผูกใบขาย)', name: e.name, amount: e.amount, source: 'ผูกใบขาย', doc: e.doc, main: G_SELL, sub: d.channel === 'CJ' ? SHIP_CJ : SHIP_OTHER, pool: '', cjType: d.channel === 'CJ' ? 'logistics' : '' });
     });
 
     // เดือนที่ไม่มีไฟล์ค่าใช้จ่ายผูกใบขาย: ใช้ค่าขนส่งที่สำนักงานลงไว้ตามช่องทางใน Report แทน (ข้ามบรรทัดที่ยอดตรงกับไฟล์ดิบ กันนับซ้ำ)
@@ -113,7 +199,7 @@
     officeLines.forEach(l => {
       if (hasOrd[l.month] || !salesMonths[l.month] || l.category !== 'ค่าขนส่ง' || !l.channel || /^(shared|tax)$/i.test(l.channel)) return;
       const k = l.month + '|' + l.amount.toFixed(2); if (rawAmt[k]) { rawAmt[k]--; return; }
-      expenses.push({ file: l.file, month: l.month, channel: l.channel, nature: 'var', category: 'ค่าขนส่ง (จาก Report สำนักงาน)', name: l.name + (l.detail ? ' · ' + l.detail : ''), amount: l.amount, source: 'Report สำนักงาน', cjType: l.channel === 'CJ' ? 'logistics' : '' });
+      expenses.push({ file: l.file, month: l.month, channel: l.channel, nature: 'var', category: 'ค่าขนส่ง (จาก Report สำนักงาน)', name: l.name + (l.detail ? ' · ' + l.detail : ''), amount: l.amount, source: 'Report สำนักงาน', main: G_SELL, sub: l.channel === 'CJ' ? SHIP_CJ : SHIP_OTHER, pool: '', cjType: l.channel === 'CJ' ? 'logistics' : '' });
     });
 
     const cnt = {}; sales.forEach(s => { if (!s.ret) cnt[s.month] = (cnt[s.month] || 0) + 1; });
@@ -125,10 +211,11 @@
     const noCostOut = {}; Object.keys(noCost).forEach(m => { noCostOut[m] = [...noCost[m]]; });
     const wh = {}; live('cjWarehouse').forEach(f => f.lines.forEach(l => { (wh[l.month] || (wh[l.month] = {}))[l.wh] = l.sales; }));
     const truck = {}; live('truckRates').forEach(f => f.lines.forEach(l => { if (l.perBag) (truck[l.wh] || (truck[l.wh] = {}))[l.type] = l; }));
-    return { wh, truck, sales, expenses, docs, purchases, purchaseExp, snapFor, snapMonths, costOf, months, mainMonth: months[months.length - 1] || '',
-      has: m => ({ expenses: expenses.some(e => e.month === m && e.source === 'รายจ่ายอื่น'), orderExp: expenses.some(e => e.month === m && e.source === 'ผูกใบขาย'), fill: expenses.some(e => e.month === m && e.source === 'Report สำนักงาน'), stock: snapMonths.includes(m), cost: !!costTab[m], costFrom: costTab[m] ? m : (costMonths.filter(x => x < m).pop() || '') }),
+    const cancelledDocs = [...cancelMap.values()].map(c => Object.assign({}, c, { channel: cfg.channelMap[c.rawChannel] || c.rawChannel }));
+    return { wh, truck, sales, expenses, docs, purchases, purchaseExp, snapFor, snapMonths, costOf, months, mainMonth: months[months.length - 1] || '', recon, buyLines, cancelledDocs,
+      has: m => ({ costCalc: !!(recon[m] && !office[m]), expenses: expenses.some(e => e.month === m && e.source === 'รายจ่ายอื่น'), orderExp: expenses.some(e => e.month === m && e.source === 'ผูกใบขาย'), fill: expenses.some(e => e.month === m && e.source === 'Report สำนักงาน'), stock: snapMonths.includes(m), cost: !!office[m], costFrom: costTab[m] ? m : (costMonths.filter(x => x < m).pop() || '') }),
       checks: { unmappedCh: [...unmappedCh], unmappedPrefix: [...unmappedPrefix], noCost: noCostOut, orphan, summary, detailValue,
-        cancelled: live('sales').reduce((s, f) => s + (f.cancelled || 0), 0), dups: files.filter(f => f.dup) } };
+        cancelled: cancelMap.size, dups: files.filter(f => f.dup) } };
   }
 
   const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
@@ -139,10 +226,10 @@
     if (mode === 'accrual') {
       ex = ex.filter(e => e.cjType !== 'promoBill');
       const q = sum(model.sales.filter(s => s.month === month && s.channel === 'CJ' && cfg.promo.skus.includes(s.sku)), s => s.qty);
-      if (q) ex.push({ month, channel: 'CJ', nature: 'var', category: 'ค่าร่วมโปร (ตั้งประมาณการ)', name: `${cfg.promo.rate} บาท x ${q.toLocaleString()} ถุง`, amount: q * cfg.promo.rate, source: 'สูตร', cjType: 'promoAccrual' });
+      if (q) ex.push({ month, channel: 'CJ', nature: 'var', category: 'ค่าร่วมโปร (ตั้งประมาณการ)', name: `${cfg.promo.rate} บาท x ${q.toLocaleString()} ถุง`, amount: q * cfg.promo.rate, source: 'สูตร', main: G_SELL, sub: SUB_RULES[0][1], pool: '', cjType: 'promoAccrual' });
     }
-    if (mode !== 'accrual') cfg.promoRounds.filter(a => a.month === month).forEach(a => ex.push({ month, channel: 'CJ', nature: 'var', category: 'ค่าโปร 1 แถม 1 (กรอกจากใบแจ้งหนี้)', name: a.label, amount: +a.amount || 0, source: 'กรอกเอง', cjType: 'promoBill' }));
-    cfg.adjustments.filter(a => a.month === month).forEach(a => ex.push({ month, channel: a.channel, nature: a.nature || 'var', category: 'รายการปรับปรุง', name: a.label, amount: +a.amount || 0, source: 'ปรับปรุง', cjType: a.channel === 'CJ' ? 'other' : '' }));
+    if (mode !== 'accrual') cfg.promoRounds.filter(a => a.month === month).forEach(a => ex.push({ month, channel: 'CJ', nature: 'var', category: 'ค่าโปร 1 แถม 1 (กรอกจากใบแจ้งหนี้)', name: a.label, amount: +a.amount || 0, source: 'กรอกเอง', main: G_SELL, sub: SUB_RULES[0][1], pool: '', cjType: 'promoBill' }));
+    cfg.adjustments.filter(a => a.month === month).forEach(a => ex.push({ month, channel: a.channel, nature: a.nature || 'var', category: 'รายการปรับปรุง', name: a.label, amount: +a.amount || 0, source: 'ปรับปรุง', main: G_ADMIN, sub: 'รายการปรับปรุงของสำนักงาน', pool: a.channel === SHARED ? 'all' : '', cjType: a.channel === 'CJ' ? 'other' : '' }));
     return ex;
   }
 
@@ -155,13 +242,16 @@
     ex.filter(e => e.channel !== SHARED).forEach(e => { get(e.channel).direct += e.amount; });
     const shared = sum(ex.filter(e => e.channel === SHARED), e => e.amount);
     const revenue = sum(Object.values(ch), c => c.revenue);
+    // ส่วนกลาง 2 กอง: กองที่ปันทุกช่องทางตามรายได้ และกองที่ไม่เกี่ยวกับ CJ ปันเฉพาะช่องทางอื่นตามรายได้
+    const revNo = revenue - (ch.CJ ? ch.CJ.revenue : 0);
+    const sharedNo = revNo > 0 ? sum(ex.filter(e => e.channel === SHARED && e.pool === 'noCJ'), e => e.amount) : 0, sharedAll = shared - sharedNo;
     const channels = Object.values(ch).map(c => {
-      const gp = c.revenue - c.cogs, contrib = gp - c.direct, alloc = revenue ? shared * c.revenue / revenue : 0;
+      const gp = c.revenue - c.cogs, contrib = gp - c.direct, alloc = (revenue ? sharedAll * c.revenue / revenue : 0) + (c.channel !== 'CJ' && revNo > 0 ? sharedNo * c.revenue / revNo : 0);
       return Object.assign(c, { gp, gm: c.revenue ? gp / c.revenue : 0, contrib, contribPct: c.revenue ? contrib / c.revenue : 0, share: revenue ? c.revenue / revenue : 0, alloc, net: contrib - alloc, netPct: c.revenue ? (contrib - alloc) / c.revenue : 0 });
     }).sort((a, b) => b.revenue - a.revenue);
     const cogs = sum(channels, c => c.cogs), varExp = sum(ex.filter(e => e.nature === 'var'), e => e.amount), fixExp = sum(ex.filter(e => e.nature === 'fix'), e => e.amount);
-    const cats = {}; ex.forEach(e => { const k = e.category || '(ไม่มีหมวด)'; (cats[k] || (cats[k] = { category: k, nature: e.nature, amount: 0 })).amount += e.amount; });
-    return { month, mode, channels, shared, expenses: ex, categories: Object.values(cats).sort((a, b) => b.amount - a.amount),
+    const cats = {}; ex.forEach(e => { const k = (e.main || G_ADMIN) + '|' + (e.sub || OTHER_SUB); (cats[k] || (cats[k] = { main: e.main || G_ADMIN, sub: e.sub || OTHER_SUB, amount: 0 })).amount += e.amount; });
+    return { month, mode, channels, shared, sharedAll, sharedNo, expenses: ex, categories: Object.values(cats).sort((a, b) => GROUPS.indexOf(a.main) - GROUPS.indexOf(b.main) || b.amount - a.amount),
       totals: { revenue, cogs, gp: revenue - cogs, gm: revenue ? (revenue - cogs) / revenue : 0, varExp, fixExp, contribution: revenue - cogs - varExp, op: revenue - cogs - varExp - fixExp } };
   }
 
@@ -315,5 +405,5 @@
     return { auto, a, rows, min, last };
   }
 
-  g.Engine = { DEFAULT_CFG, SHARED, EXCLUDE, CJ_TYPES, build, compute, cjDetail, skuTable, trend, breakeven, channelTrend, promoRounds, cash, forecast, warehouses, guessNature };
+  g.Engine = { DEFAULT_CFG, SHARED, EXCLUDE, CJ_TYPES, GROUPS, groupOf, build, compute, cjDetail, skuTable, trend, breakeven, channelTrend, promoRounds, cash, forecast, warehouses, guessNature };
 })(window);

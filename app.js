@@ -18,7 +18,9 @@
   function loadCfg() {
     const d = JSON.parse(JSON.stringify(E.DEFAULT_CFG)), cl = window.MR_CLIENT || {};
     Object.keys(cl).forEach(k => { d[k] = (d[k] && typeof d[k] === 'object' && !Array.isArray(d[k])) ? Object.assign(d[k], cl[k]) : cl[k]; });
-    try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) Object.keys(d).forEach(k => { if (s[k] != null) d[k] = (typeof d[k] === 'object' && !Array.isArray(d[k])) ? Object.assign(d[k], s[k]) : s[k]; }); } catch (e) { /* ใช้ค่าเริ่มต้น */ }
+    let srev = 0; try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) srev = s.rev || 0; if (s) Object.keys(d).forEach(k => { if (s[k] != null) d[k] = (typeof d[k] === 'object' && !Array.isArray(d[k])) ? Object.assign(d[k], s[k]) : s[k]; }); } catch (e) { /* ใช้ค่าเริ่มต้น */ }
+    // ไฟล์ค่าเฉพาะกิจการมี rev ใหม่กว่าที่บันทึกไว้: ใช้ตารางจับคู่และกฎจากไฟล์นั้นทับ 1 ครั้ง
+    if (cl.rev && srev !== cl.rev) { ['channelMap', 'prefixMap'].forEach(k => Object.assign(d[k], cl[k] || {})); ['channelRules', 'noCJ', 'excludeWords', 'purchaseFeeSkus'].forEach(k => { if (cl[k]) d[k] = cl[k]; }); d.rev = cl.rev; }
     return d;
   }
   function saveCfg() { try { localStorage.setItem(hosted ? hostKey : KEY, JSON.stringify(cfg)); } catch (e) { /* เก็บไม่ได้ก็ยังใช้งานต่อได้ */ } }
@@ -154,17 +156,18 @@
       ${kpi('กำไรจากการดำเนินงาน', 'op', f0(t.op), pc(t.revenue ? t.op / t.revenue : 0) + ' ของรายได้', { bad: t.op < 0, delta: p ? arrow(t.op, p.op) : '' })}
       ${cj ? kpi('กำไรจาก CJ', 'cjContrib', f0(cj.contrib), pc(cj.contribPct) + ' ของยอดขาย CJ', { bad: cj.contrib < 0, delta: pcj ? arrow(cj.contribPct, pcj.contribPct, 1) : '' }) : ''}
     </div>
-    <div class="card">${H('กำไรรายช่องทาง', 'oChannel', `${mLabel(month)} · ค่าใช้จ่ายส่วนกลาง ${f0(r.shared)} บาท จัดสรรตามสัดส่วนรายได้`)}
-      <div class="tw"><table><thead><tr><th>ช่องทาง</th><th class="r">รายได้</th><th class="r">สัดส่วน</th><th class="r">ต้นทุนสินค้า</th><th class="r">กำไรขั้นต้น %</th><th class="r">ค่าใช้จ่ายตรง</th><th class="r">กำไรหลังค่าใช้จ่ายตรง</th><th class="r">%</th><th class="r">ส่วนกลางจัดสรร</th><th class="r">กำไรสุทธิ</th><th class="r">%</th></tr></thead><tbody>
+    <div class="card">${H('กำไรรายช่องทาง', 'oChannel', `${mLabel(month)} · ค่าใช้จ่ายส่วนกลาง ${f0(r.shared)} บาท ปันตามสัดส่วนรายได้${r.sharedNo ? ` โดย ${f0(r.sharedNo)} บาทเป็นรายการที่ไม่เกี่ยวกับ CJ จึงปันเฉพาะช่องทางอื่น` : ''}`)}
+      <div class="tw"><table><thead><tr><th>ช่องทาง</th><th class="r">รายได้</th><th class="r">สัดส่วน</th><th class="r">ต้นทุนสินค้า</th><th class="r">กำไรขั้นต้น %</th><th class="r">ค่าใช้จ่ายตรง</th><th class="r">กำไรหลังค่าใช้จ่ายตรง</th><th class="r">%</th><th class="r">ส่วนกลางที่ปันให้</th><th class="r">กำไรสุทธิ</th><th class="r">%</th></tr></thead><tbody>
       ${r.channels.map(c => `<tr${c.channel === 'CJ' ? ' class="hl"' : ''}><td>${esc(c.channel)}</td><td class="r">${f0(c.revenue)}</td><td class="r">${pc(c.share)}</td><td class="r">${f0(c.cogs)}</td><td class="r">${pc(c.gm)}</td><td class="r">${f0(c.direct)}</td><td class="r${cls(c.contrib)}">${f0(c.contrib)}</td><td class="r${cls(c.contrib)}">${pc(c.contribPct)}</td><td class="r">${f0(c.alloc)}</td><td class="r${cls(c.net)}">${f0(c.net)}</td><td class="r${cls(c.net)}">${pc(c.netPct)}</td></tr>`).join('')}
       <tr class="tot"><td>รวม</td><td class="r">${f0(t.revenue)}</td><td class="r">100.0%</td><td class="r">${f0(t.cogs)}</td><td class="r">${pc(t.gm)}</td><td class="r">${f0(r.channels.reduce((s, c) => s + c.direct, 0))}</td><td class="r">${f0(r.channels.reduce((s, c) => s + c.contrib, 0))}</td><td></td><td class="r">${f0(r.shared)}</td><td class="r${cls(t.op)}">${f0(t.op)}</td><td class="r${cls(t.op)}">${pc(t.revenue ? t.op / t.revenue : 0)}</td></tr>
       </tbody></table></div></div>
     <div class="grid g2">
       <div class="card">${H('ช่องทางไหนทำกำไรให้บริษัท', 'oBars', 'กำไรหลังค่าใช้จ่ายตรง · บาท')}${bars(r.channels.map(c => ({ label: c.channel, value: c.contrib })))}</div>
-      <div class="card">${H('เงินออกไปกับอะไร', 'oCats', 'ค่าใช้จ่ายตามหมวด ไม่รวม VAT')}
-        <div class="tw"><table><thead><tr><th>หมวด</th><th>ลักษณะ</th><th class="r">บาท</th><th class="r">ต่อรายได้</th></tr></thead><tbody>
-        ${r.categories.map(c => `<tr><td>${esc(c.category)}</td><td class="muted">${c.nature === 'fix' ? 'คงที่' : 'ผันแปร'}</td><td class="r">${f0(c.amount)}</td><td class="r">${pc(t.revenue ? c.amount / t.revenue : 0)}</td></tr>`).join('')}
-        <tr class="tot"><td>รวม</td><td></td><td class="r">${f0(t.varExp + t.fixExp)}</td><td class="r">${pc(t.revenue ? (t.varExp + t.fixExp) / t.revenue : 0)}</td></tr></tbody></table></div></div>
+      <div class="card">${H('เงินออกไปกับอะไร', 'oCats', 'ค่าใช้จ่ายตามกลุ่มหลัก ไม่รวม VAT ไม่รวมต้นทุนสินค้า')}
+        <div class="tw"><table><thead><tr><th>กลุ่ม / หมวด</th><th class="r">บาท</th><th class="r">ต่อรายได้</th></tr></thead><tbody>
+        ${E.GROUPS.map(gn => { const cs = r.categories.filter(c => c.main === gn); if (!cs.length) return ''; const sm = cs.reduce((s, c) => s + c.amount, 0);
+          return `<tr class="grp"><td>${esc(gn)}</td><td class="r">${f0(sm)}</td><td class="r">${pc(t.revenue ? sm / t.revenue : 0)}</td></tr>` + cs.map(c => `<tr><td class="ind">${esc(c.sub)}</td><td class="r">${f0(c.amount)}</td><td class="r">${pc(t.revenue ? c.amount / t.revenue : 0)}</td></tr>`).join(''); }).join('')}
+        <tr class="tot"><td>รวม</td><td class="r">${f0(t.varExp + t.fixExp)}</td><td class="r">${pc(t.revenue ? (t.varExp + t.fixExp) / t.revenue : 0)}</td></tr></tbody></table></div></div>
     </div>`;
   }
 
@@ -429,7 +432,7 @@
         ${sm != null ? li(Math.abs(dv - sm) < Math.max(1, sm * 0.0005), `ยอดขายรวม VAT หักรับคืน จากไฟล์รายบรรทัด ${f0(dv)} บาท เทียบไฟล์สรุปยอดขาย ${f0(sm)} บาท ผลต่าง ${f0(dv - sm)}`) : li(false, 'เดือนนี้ไม่มีไฟล์สรุปยอดขายให้เทียบ')}
         ${li(h.expenses, h.expenses ? 'มีไฟล์รายจ่ายอื่นของเดือนนี้' : 'เดือนนี้ไม่มีไฟล์รายจ่ายอื่น กำไรจะสูงเกินจริง')}
         ${li(h.orderExp || h.fill, h.orderExp ? 'มีไฟล์ค่าใช้จ่ายที่ผูกกับใบขาย (ค่าขนส่ง) ของเดือนนี้' : h.fill ? 'เดือนนี้ไม่มีไฟล์ค่าใช้จ่ายที่ผูกกับใบขาย ใช้ค่าขนส่งตามช่องทางจาก Report สำนักงานแทน' : 'เดือนนี้ไม่มีไฟล์ค่าใช้จ่ายที่ผูกกับใบขาย ค่าขนส่งรายบิลจึงไม่ครบ')}
-        ${li(h.cost, h.cost ? 'ใช้ต้นทุนถัวเฉลี่ยของงวดนี้จากตารางต้นทุนที่สำนักงานคำนวณ' : h.costFrom ? `สำนักงานยังไม่ได้คำนวณต้นทุนของเดือนนี้ ใช้ต้นทุนถัวเฉลี่ยของ ${mLabel(h.costFrom)} แทนไปก่อน` : (h.stock ? 'ไม่มีตารางต้นทุนของสำนักงานสำหรับเดือนนี้ ใช้ต้นทุนต่อหน่วยในไฟล์สต๊อกของโปรแกรมขายแทน' : 'ไม่มีทั้งตารางต้นทุนและไฟล์สต๊อกของเดือนนี้ ใช้ต้นทุนจากเดือนที่ใกล้ที่สุด'))}
+        ${li(h.cost || h.costCalc, h.cost ? 'ใช้ต้นทุนถัวเฉลี่ยของงวดนี้จากตารางต้นทุนที่สำนักงานคำนวณ' : h.costCalc ? 'สำนักงานยังไม่ได้ทำตารางต้นทุนของเดือนนี้ โปรแกรมคำนวณต้นทุนถัวเฉลี่ยของงวดให้จากยอดยกมา รายการซื้อ ค่าใช้จ่ายนำเข้า และรายงานสินค้าเคลื่อนไหว (ดู Tab กระทบต้นทุน ในไฟล์ Export)' : h.costFrom ? `สำนักงานยังไม่ได้คำนวณต้นทุนของเดือนนี้ ใช้ต้นทุนถัวเฉลี่ยของ ${mLabel(h.costFrom)} แทนไปก่อน` : (h.stock ? 'ไม่มีตารางต้นทุนของสำนักงานสำหรับเดือนนี้ ใช้ต้นทุนต่อหน่วยในไฟล์สต๊อกของโปรแกรมขายแทน' : 'ไม่มีทั้งตารางต้นทุนและไฟล์สต๊อกของเดือนนี้ ใช้ต้นทุนจากเดือนที่ใกล้ที่สุด'))}
         ${li(h.stock, h.stock ? 'มีไฟล์สต๊อกสิ้นเดือนนี้' : 'ไม่มีไฟล์สต๊อกสิ้นเดือนนี้ หน้าสินค้าใช้สต๊อกของเดือนที่ใกล้ที่สุด')}
         ${li(!c.unmappedCh.length, c.unmappedCh.length ? 'ช่องทางที่ยังไม่ได้จับคู่ (ทุกเดือน): ' + esc(c.unmappedCh.join(', ')) : 'ทุกช่องทางขายจับคู่แล้ว')}
         ${li(!c.unmappedPrefix.length, c.unmappedPrefix.length ? 'รหัสนำหน้าค่าใช้จ่ายที่ยังไม่ได้จับคู่ (ลงส่วนกลางไว้ก่อน): ' + esc(c.unmappedPrefix.join(', ')) : 'ทุกรหัสนำหน้าค่าใช้จ่ายจับคู่แล้ว')}
@@ -460,6 +463,9 @@
       <label>Commercial support (%)<input type="number" step="any" data-cfg="tta.cs" value="${cfg.tta.cs}"></label>
       <label>สาขาใหม่ (%)<input type="number" step="any" data-cfg="tta.ns" value="${cfg.tta.ns}"></label>
       <label>DC fee (%)<input type="number" step="any" data-cfg="tta.dc" value="${cfg.tta.dc}"></label></div></div></details>
+    <details><summary>ค่าใช้จ่ายส่วนกลาง: รายการที่ไม่ปันให้ CJ และรายการที่ไม่นับ</summary><div class="card"><p class="sub">ใส่คำที่อยู่ในชื่อรายการหรือชื่อหมวด คั่นด้วยจุลภาค รายการส่วนกลางที่ชื่อมีคำเหล่านี้จะปันเฉพาะช่องทางที่ไม่ใช่ CJ · รายการที่ชื่อมีคำในช่องที่สองจะไม่นับในกำไรขาดทุน (ภาษีและสินทรัพย์ไม่นับอยู่แล้ว)</p><div class="form">
+      <label style="grid-column:1/-1">คำของรายการส่วนกลางที่ไม่ปันให้ CJ<input type="text" data-list="noCJ" value="${esc((cfg.noCJ || []).join(', '))}"></label>
+      <label style="grid-column:1/-1">คำของรายการที่ไม่นับในกำไรขาดทุน<input type="text" data-list="excludeWords" value="${esc((cfg.excludeWords || []).join(', '))}"></label></div></div></details>
     <details><summary>รายการปรับปรุงของสำนักงาน (${cfg.adjustments.length})</summary><div class="card"><p class="sub">ใช้แทนการแก้ตัวเลขในไฟล์ดิบ ทุกรายการต้องมีเหตุผล และยังอยู่แม้อัปโหลดไฟล์ดิบใหม่</p>
       <div class="tw"><table><thead><tr><th>เดือน</th><th>ช่องทาง</th><th>รายการ</th><th class="r">ค่าใช้จ่ายเพิ่ม (ลด)</th><th>เหตุผล</th><th></th></tr></thead><tbody>
       ${cfg.adjustments.map((a, i) => `<tr><td>${mLabel(a.month)}</td><td>${esc(a.channel)}</td><td>${esc(a.label)}</td><td class="r">${f0(a.amount)}</td><td>${esc(a.reason)}</td><td><button class="btn g sm" data-deladj="${i}">ลบ</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">ยังไม่มีรายการปรับปรุง</td></tr>'}
@@ -486,9 +492,9 @@
   const scrub = t => String(t || '').replace(/\(?0\d{1,2}[- ]?\d{3}[- ]?\d{4}\)?/g, '').replace(/\s+/g, ' ').trim();
   function snapshotData() {
     const parts = files.filter(f => f.used && !f.dup).map(f => {
-      const o = { name: f.name, file: f.file, kind: f.kind, label: f.label, used: true, info: f.info, hasMap: !!f.hasMap, learned: f.learned, month: f.month, byMonth: f.byMonth, valueByMonth: f.valueByMonth, cancelled: f.cancelled, hash: f.hash };
+      const o = { name: f.name, file: f.file, kind: f.kind, label: f.label, used: true, info: f.info, hasMap: !!f.hasMap, learned: f.learned, month: f.month, byMonth: f.byMonth, valueByMonth: f.valueByMonth, cancelled: f.cancelled, cancelledDocs: f.cancelledDocs, hash: f.hash };
       let lines = f.lines || [];
-      if (f.kind === 'sales' || f.kind === 'returns') lines = lines.map(l => Object.assign({}, l, { customer: '', note: /ขาดส่ง/.test(l.note) ? 'ขาดส่ง' : '' }));
+      if (f.kind === 'sales' || f.kind === 'returns') lines = lines.map(l => Object.assign({}, l, { customer: '', note: /ขาดส่ง/.test(l.note) ? 'ขาดส่ง' : /เสียหาย|ทำลาย|ชำรุด/.test(l.note) ? 'เสียหาย' : '' }));
       else if (f.kind === 'expenses') lines = lines.map(l => Object.assign({}, l, { contact: '', name: scrub(l.name) }));
       else if (f.kind === 'purchases') lines = lines.map(l => Object.assign({}, l, { contact: '' }));
       else if (f.kind === 'officeExp') lines = lines.filter(l => l.category === 'ค่าขนส่ง').map(l => Object.assign({}, l, { detail: scrub(l.detail) }));
@@ -605,6 +611,7 @@
     else if (t.id === 'skuCh') { skuCh = t.value; render(); }
     else if (t.dataset.map) { const v = t.value.trim(); if (v) cfg[t.dataset.map][t.dataset.k] = v; else delete cfg[t.dataset.map][t.dataset.k]; rebuild(); }
     else if (t.dataset.fc) { if (t.value === '') delete cfg.fc[t.dataset.fc]; else cfg.fc[t.dataset.fc] = +t.value || 0; saveCfg(); render(); }
+    else if (t.dataset.list) { cfg[t.dataset.list] = t.value.split(',').map(x => x.trim()).filter(Boolean); rebuild(); }
     else if (t.dataset.cfg1) { cfg[t.dataset.cfg1] = +t.value || 0; saveCfg(); render(); }
     else if (t.dataset.cfg) {
       const [a, b] = t.dataset.cfg.split('.');
