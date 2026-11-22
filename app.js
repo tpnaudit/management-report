@@ -13,7 +13,7 @@
   const mLabel = k => k ? TH_M[+k.slice(5) - 1] + ' ' + (+k.slice(0, 4) + 543) : '';
 
   let hosted = false, hostKey = '';
-  let cfg = loadCfg(), files = [], model = null, tab = 'import', month = '', sample = null, cjScope = 'promo', sim = null;
+  let cfg = loadCfg(), files = [], model = null, tab = 'import', month = '', sample = null, cjScope = 'promo', sim = null, picked = false;
 
   function loadCfg() {
     const d = JSON.parse(JSON.stringify(E.DEFAULT_CFG)), cl = window.MR_CLIENT || {};
@@ -41,7 +41,7 @@
       files = files.filter(x => x.file !== f.name).concat(parts);
     }
     const first = !model; rebuild();
-    if (first && model) { tab = model.months.length > 1 ? 'trend' : 'overview'; render(); }
+    if (first && model) { if (!picked || tab === 'import') tab = model.months.length > 1 ? 'trend' : 'overview'; render(); }
   }
   async function loadSample() {
     if (!sample) return;
@@ -99,7 +99,7 @@
     ${T.length > 1 ? lead(AL.unit.profit < avgU * 0.5 ? 'warn' : 'ok', `สรุป ${mLabel(L.month)}`, `ส่ง${esc(N.productLabel || 'สินค้าที่ร่วมโปร')}เข้า CJ <b>${f0(L.promoQty)} ถุง</b>${avgQ ? ` (${(L.promoQty / avgQ).toFixed(1)} เท่าของค่าเฉลี่ย${cmp})` : ''} ถ้านับค่าโปร 1 แถม 1 ตามบิลจริง เหลือกำไร <b class="${AL.unit.profit < 0 ? 'neg' : ''}">${f2(AL.unit.profit)} บาทต่อถุง</b> เทียบกับเฉลี่ย${cmp} ${f2(avgU)} บาท ส่วนแบบตั้งประมาณการ ${cfg.promo.rate} บาท/ถุงจะเห็นเป็น ${f2(B[si].unit.profit)} บาท`) : ''}
     <div class="grid g2">
       <div class="card">${H('กำไรต่อถุงที่ขายให้ CJ', 'tUnit', 'บาทต่อถุง · ' + modeName(cfg.promo.mode))}${col(t => t.unit.profit, f2)}</div>
-      <div class="card">${H('ค่าโปรที่ CJ เรียกเก็บ ต่อยอดขาย CJ', 'tPromoPct', 'ไม่รวมส่วนที่หักตามสัญญา · ' + modeName(cfg.promo.mode))}${col(t => t.cjRev ? t.cjPromo / t.cjRev : 0, pc)}</div>
+      <div class="card">${H(cfg.promo.mode === 'actual' ? 'ค่าโปรตามบิล CJ ต่อยอดขาย CJ' : 'ค่าโปร (ตั้งประมาณการ) ต่อยอดขาย CJ', 'tPromoPct', 'ไม่รวมส่วนที่หักตามสัญญา · ' + modeName(cfg.promo.mode))}${col(t => t.cjRev ? t.cjPromo / t.cjRev : 0, pc)}</div>
       <div class="card">${H('กำไรจาก CJ ทั้งเดือน', 'tCj', 'บาท หลังค่าใช้จ่ายตรงของ CJ · ' + modeName(cfg.promo.mode))}${col(t => t.cjContrib, f0)}</div>
       <div class="card">${H('จำนวนถุงที่ส่งเข้า CJ', 'tQty', 'เฉพาะสินค้าที่ร่วมโปร: ' + esc(cfg.promo.skus.join(', ')))}${col(t => t.promoQty, f0)}</div>
       <div class="card">${H('% กำไรขั้นต้น (GP) ทั้งบริษัท', 'tGp', 'กำไรขั้นต้นต่อรายได้สุทธิ')}${col(t => t.gm, pc)}</div>
@@ -140,6 +140,10 @@
   }
 
   /* ---------- ภาพรวมเดือน ---------- */
+  // คำเตือนเฉพาะช่องทาง (เช่น ข้อมูลค่าใช้จ่ายยังไม่ครบ) แสดงทั้งมุมมองสำนักงานและมุมมองผู้บริหาร
+  const chMark = c => (N.channelWarn && N.channelWarn[c]) ? ' <sup class="neg">*</sup>' : '';
+  const chWarn = list => { const w = N.channelWarn || {}; const k = Object.keys(w).filter(c => list.includes(c)); return k.length ? `<p class="warnline">${k.map(c => `<b>* ${esc(c)}</b> ${esc(w[c])}`).join(' · ')}</p>` : ''; };
+
   function vOverview() {
     const r = E.compute(model, cfg, month), t = r.totals, a = E.compute(model, cfg, month, 'actual').totals, b = E.compute(model, cfg, month, 'accrual').totals;
     const pm = prevOf(month), pr = pm ? E.compute(model, cfg, pm) : null, p = pr ? pr.totals : null;
@@ -154,15 +158,16 @@
       ${kpi('กำไรขั้นต้น', 'gp', f0(t.gp), pc(t.gm) + ' ของรายได้', { delta: p ? arrow(t.gm, p.gm, 1) : '' })}
       ${kpi('กำไรหลังค่าใช้จ่ายผันแปร', 'contribution', f0(t.contribution), pc(t.revenue ? t.contribution / t.revenue : 0) + ' ของรายได้', { bad: t.contribution < 0 })}
       ${kpi('กำไรจากการดำเนินงาน', 'op', f0(t.op), pc(t.revenue ? t.op / t.revenue : 0) + ' ของรายได้', { bad: t.op < 0, delta: p ? arrow(t.op, p.op) : '' })}
-      ${cj ? kpi('กำไรจาก CJ', 'cjContrib', f0(cj.contrib), pc(cj.contribPct) + ' ของยอดขาย CJ', { bad: cj.contrib < 0, delta: pcj ? arrow(cj.contribPct, pcj.contribPct, 1) : '' }) : ''}
+      ${cj ? kpi('กำไร CJ ก่อนปันส่วนกลาง', 'cjContrib', f0(cj.contrib), pc(cj.contribPct) + ' ของยอดขาย CJ', { bad: cj.contrib < 0, delta: pcj ? arrow(cj.contribPct, pcj.contribPct, 1) : '' }) : ''}
+      ${cj ? kpi('กำไรสุทธิ CJ หลังปันส่วนกลาง', 'cjNet', f0(cj.net), pc(cj.netPct) + ' ของยอดขาย CJ', { bad: cj.net < 0, delta: pcj ? arrow(cj.netPct, pcj.netPct, 1) : '' }) : ''}
     </div>
     <div class="card">${H('กำไรรายช่องทาง', 'oChannel', `${mLabel(month)} · ค่าใช้จ่ายส่วนกลาง ${f0(r.shared)} บาท ปันตามสัดส่วนรายได้${r.sharedNo ? ` โดย ${f0(r.sharedNo)} บาทเป็นรายการที่ไม่เกี่ยวกับ CJ จึงปันเฉพาะช่องทางอื่น` : ''}`)}
       <div class="tw"><table><thead><tr><th>ช่องทาง</th><th class="r">รายได้</th><th class="r">สัดส่วน</th><th class="r">ต้นทุนสินค้า</th><th class="r">กำไรขั้นต้น %</th><th class="r">ค่าใช้จ่ายตรง</th><th class="r">กำไรหลังค่าใช้จ่ายตรง</th><th class="r">%</th><th class="r">ส่วนกลางที่ปันให้</th><th class="r">กำไรสุทธิ</th><th class="r">%</th></tr></thead><tbody>
-      ${r.channels.map(c => `<tr${c.channel === 'CJ' ? ' class="hl"' : ''}><td>${esc(c.channel)}</td><td class="r">${f0(c.revenue)}</td><td class="r">${pc(c.share)}</td><td class="r">${f0(c.cogs)}</td><td class="r">${pc(c.gm)}</td><td class="r">${f0(c.direct)}</td><td class="r${cls(c.contrib)}">${f0(c.contrib)}</td><td class="r${cls(c.contrib)}">${pc(c.contribPct)}</td><td class="r">${f0(c.alloc)}</td><td class="r${cls(c.net)}">${f0(c.net)}</td><td class="r${cls(c.net)}">${pc(c.netPct)}</td></tr>`).join('')}
+      ${r.channels.map(c => `<tr${c.channel === 'CJ' ? ' class="hl"' : ''}><td>${esc(c.channel)}${chMark(c.channel)}</td><td class="r">${f0(c.revenue)}</td><td class="r">${pc(c.share)}</td><td class="r">${f0(c.cogs)}</td><td class="r">${pc(c.gm)}</td><td class="r">${f0(c.direct)}</td><td class="r${cls(c.contrib)}">${f0(c.contrib)}</td><td class="r${cls(c.contrib)}">${pc(c.contribPct)}</td><td class="r">${f0(c.alloc)}</td><td class="r${cls(c.net)}">${f0(c.net)}</td><td class="r${cls(c.net)}">${pc(c.netPct)}</td></tr>`).join('')}
       <tr class="tot"><td>รวม</td><td class="r">${f0(t.revenue)}</td><td class="r">100.0%</td><td class="r">${f0(t.cogs)}</td><td class="r">${pc(t.gm)}</td><td class="r">${f0(r.channels.reduce((s, c) => s + c.direct, 0))}</td><td class="r">${f0(r.channels.reduce((s, c) => s + c.contrib, 0))}</td><td></td><td class="r">${f0(r.shared)}</td><td class="r${cls(t.op)}">${f0(t.op)}</td><td class="r${cls(t.op)}">${pc(t.revenue ? t.op / t.revenue : 0)}</td></tr>
-      </tbody></table></div></div>
+      </tbody></table></div>${chWarn(r.channels.map(c => c.channel))}</div>
     <div class="grid g2">
-      <div class="card">${H('ช่องทางไหนทำกำไรให้บริษัท', 'oBars', 'กำไรหลังค่าใช้จ่ายตรง · บาท')}${bars(r.channels.map(c => ({ label: c.channel, value: c.contrib })))}</div>
+      <div class="card">${H('ช่องทางไหนทำกำไรให้บริษัท', 'oBars', 'กำไรสุทธิหลังปันส่วนกลาง · บาท')}${bars(r.channels.map(c => ({ label: c.channel, value: c.net })))}</div>
       <div class="card">${H('เงินออกไปกับอะไร', 'oCats', 'ค่าใช้จ่ายตามกลุ่มหลัก ไม่รวม VAT ไม่รวมต้นทุนสินค้า')}
         <div class="tw"><table><thead><tr><th>กลุ่ม / หมวด</th><th class="r">บาท</th><th class="r">ต่อรายได้</th></tr></thead><tbody>
         ${E.GROUPS.map(gn => { const cs = r.categories.filter(c => c.main === gn); if (!cs.length) return ''; const sm = cs.reduce((s, c) => s + c.amount, 0);
@@ -305,10 +310,10 @@
       </tbody></table></div></div>
     <div class="card">${H('ค่าโฆษณาและกำไรของแต่ละช่องทาง', 'chDetail', mLabel(month))}
       <div class="tw"><table><thead><tr><th>ช่องทาง</th><th class="r">ยอดขาย</th><th class="r">กำไรขั้นต้น %</th><th class="r">ค่าโฆษณา</th><th class="r">ค่าโฆษณาต่อยอดขาย</th><th class="r">ค่าขนส่งและอื่น ๆ</th><th class="r">กำไรหลังค่าใช้จ่ายตรง</th><th class="r">%</th></tr></thead><tbody>
-      ${cur.map(x => `<tr><td>${esc(x.c)}</td><td class="r">${f0(x.revenue)}</td><td class="r">${pc(x.gm)}</td><td class="r">${x.ads ? f0(x.ads) : ''}</td><td class="r${x.revenue && x.ads / x.revenue > 0.2 ? ' neg' : ''}">${x.ads && x.revenue ? pc(x.ads / x.revenue) : ''}</td><td class="r">${x.ship ? f0(x.ship) : ''}</td><td class="r${cls(x.contrib)}">${f0(x.contrib)}</td><td class="r${cls(x.contrib)}">${pc(x.contribPct)}</td></tr>`).join('')}
+      ${cur.map(x => `<tr><td>${esc(x.c)}${chMark(x.c)}</td><td class="r">${f0(x.revenue)}</td><td class="r">${pc(x.gm)}</td><td class="r">${x.ads ? f0(x.ads) : ''}</td><td class="r${x.revenue && x.ads / x.revenue > 0.2 ? ' neg' : ''}">${x.ads && x.revenue ? pc(x.ads / x.revenue) : ''}</td><td class="r">${x.ship ? f0(x.ship) : ''}</td><td class="r${cls(x.contrib)}">${f0(x.contrib)}</td><td class="r${cls(x.contrib)}">${pc(x.contribPct)}</td></tr>`).join('')}
       <tr class="tot"><td>รวม</td><td class="r">${f0(tot.revenue)}</td><td></td><td class="r">${f0(tot.ads)}</td><td class="r">${pc(tot.revenue ? tot.ads / tot.revenue : 0)}</td><td class="r">${f0(tot.ship)}</td><td class="r">${f0(tot.contrib)}</td><td class="r">${pc(tot.revenue ? tot.contrib / tot.revenue : 0)}</td></tr>
       </tbody></table></div>
-      ${N.channels ? `<div class="note">${esc(N.channels)}</div>` : ''}</div>`;
+      ${chWarn(cur.map(x => x.c))}${N.channels ? `<div class="note">${esc(N.channels)}</div>` : ''}</div>`;
   }
 
   /* ---------- ประมาณการเงินสด 3 เดือน ---------- */
@@ -417,7 +422,7 @@
     <div class="card">${H('สินค้าขายดี ' + (skuCh ? 'ของ ' + esc(skuCh) : 'ทุกช่องทาง'), 'skuCh', 'ยอดขาย · บาท')}${bars(top.map(r => ({ label: r.sku + ' ' + (N.nameTrim && r.name.indexOf(N.nameTrim) === 0 ? r.name.slice(N.nameTrim.length) : r.name).slice(0, 26), value: r.revenue })))}</div>
     <div class="card">${H('กำไรและสต๊อกรายสินค้า', 'sku', `"พอขาย" คิดจากยอดขายเดือนนี้ทุกช่องทาง`)}
       <div class="tw"><table><thead><tr><th>รหัส</th><th>สินค้า</th><th class="r">จำนวนขาย</th><th class="r">ยอดขาย</th><th class="r">สัดส่วน</th><th class="r">กำไรขั้นต้น</th><th class="r">%</th><th class="r">ราคาเฉลี่ย</th><th class="r">ต้นทุน/หน่วย</th><th class="r">สต๊อก</th><th class="r">พอขาย (วัน)</th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td class="r">${f0(r.qty)}</td><td class="r">${f0(r.revenue)}</td><td class="r">${pc(tot ? r.revenue / tot : 0)}</td><td class="r${cls(r.gp)}">${f0(r.gp)}</td><td class="r${cls(r.gp)}">${pc(r.gm)}</td><td class="r">${r.qty > 0 ? f2(r.revenue / r.qty) : ''}</td><td class="r">${f2(r.cost)}</td><td class="r${r.stockQty < 0 ? ' neg' : ''}">${r.stockQty == null ? '' : f0(r.stockQty)}</td><td class="r${!skuCh && r.days != null && r.days < 15 ? ' neg' : ''}">${skuCh || r.days == null ? '' : f0(r.days)}</td></tr>`).join('')}
+      ${rows.map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td class="r">${f0(r.qty)}</td><td class="r">${f0(r.revenue)}</td><td class="r">${pc(tot ? r.revenue / tot : 0)}</td>${!r.cost && r.qty > 0 && r.sku.charAt(0) !== '(' ? '<td class="r" colspan="2"><span class="tag warn">ไม่มีข้อมูลต้นทุน</span></td>' : `<td class="r${cls(r.gp)}">${f0(r.gp)}</td><td class="r${cls(r.gp)}">${pc(r.gm)}</td>`}<td class="r">${r.qty > 0 ? f2(r.revenue / r.qty) : ''}</td><td class="r">${!r.cost && r.qty > 0 && r.sku.charAt(0) !== '(' ? '<span class="muted">ไม่มีข้อมูล</span>' : f2(r.cost)}</td><td class="r${r.stockQty < 0 ? ' neg' : ''}">${r.stockQty == null ? '<span class="muted">ไม่มีข้อมูล</span>' : f0(r.stockQty)}</td><td class="r${!skuCh && r.days != null && r.days < 15 ? ' neg' : ''}">${skuCh || r.days == null ? '' : f0(r.days)}</td></tr>`).join('')}
       </tbody></table></div></div>`;
   }
 
@@ -529,7 +534,7 @@
     try { const own = JSON.parse(localStorage.getItem(hostKey) || 'null'); if (own) cfg = own; } catch (e) { /* ใช้ค่าจากชุดข้อมูล */ }
     try { localStorage.setItem('mr_pin', pin); } catch (e) { /* ไม่จำรหัสก็ยังใช้ได้ */ }
     files = d.files; document.body.classList.remove('locked');
-    applyPresent(); rebuild(); tab = 'trend'; render();
+    applyPresent(); rebuild(); if (!picked || (tab === 'import' && cfg.present)) tab = 'trend'; render();
   }
   function startHosted() {
     let saved = ''; try { saved = localStorage.getItem('mr_pin') || ''; } catch (e) { /* ไม่มีรหัสที่จำไว้ */ }
@@ -568,7 +573,7 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
   window.addEventListener('scroll', hideTip, true);
 
-  $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.tab; render(); window.scrollTo(0, 0); } });
+  $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.tab; picked = true; render(); window.scrollTo(0, 0); } });
   $('#mode').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { cfg.promo.mode = b.dataset.mode; saveCfg(); render(); } });
   function applyPresent() { document.body.classList.toggle('present', !!cfg.present); $('#present').checked = !!cfg.present; if (cfg.present && tab === 'import' && model) tab = 'trend'; }
   $('#present').addEventListener('change', e => { cfg.present = e.target.checked; saveCfg(); applyPresent(); render(); });

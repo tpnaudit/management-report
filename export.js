@@ -155,7 +155,7 @@
     const C = E.cash(model, cfg), F = E.forecast(model, cfg);
     title(wk, 'เงินสดรับจ่ายรายเดือน และประมาณการ 3 เดือนข้างหน้า', `ประมาณการจากวันครบกำหนดและวันที่จ่ายในไฟล์ ไม่ใช่ยอดธนาคาร · เครดิต CJ ${cfg.cjCreditDays} วัน`);
     const known = C.rows.filter(x => x.known), allc = known.concat(F ? F.rows : []);
-    const hk = wk.getRow(4); hk.getCell(1).value = 'รายการ'; allc.forEach((x, i) => { hk.getCell(2 + i).value = mLabel(x.month) + (x.known ? '' : ' (ประมาณการ)'); }); head(hk, 1, 1 + allc.length);
+    const hk = wk.getRow(4); hk.getCell(1).value = 'รายการ'; allc.forEach((x, i) => { hk.getCell(2 + i).value = mLabel(x.month) + (x.known ? '' : ' (ประมาณการ)'); }); head(hk, 1, 1 + allc.length); hk.height = 32;
     const kr = [['เงินสดต้นงวด', x => x.known ? null : x.open], ['ใบกำกับ CJ ที่ครบกำหนด (ออกใบแล้ว)', x => x.cjIn], ['CJ จากยอดขายที่คาดการณ์', x => x.known ? 0 : x.cjNew], ['หัก ส่วนที่ CJ หัก (รู้แล้ว)', x => -x.cjDeduct], ['หัก ส่วนที่ CJ หัก (คาดการณ์)', x => x.known ? 0 : -x.cjDedNew], ['เงินเข้าจากช่องทางอื่น', x => x.known ? x.otherIn : x.otherIn + x.otherNew], ['จ่ายค่าสินค้าและค่านำเข้า', x => -(x.known ? x.buy : x.buyAll)], ['จ่ายค่าใช้จ่ายอื่น', x => -(x.known ? x.exp : x.expAll)]];
     kr.forEach((it, k) => { const row = wk.getRow(5 + k); row.getCell(1).value = it[0]; allc.forEach((x, i) => { const v = it[1](x); if (v != null) { row.getCell(2 + i).value = v; row.getCell(2 + i).numFmt = NUM; } }); });
     { const row = wk.getRow(5 + kr.length); row.getCell(1).value = 'เงินสดสุทธิของเดือน'; allc.forEach((x, i) => { const c = col(2 + i); row.getCell(2 + i).value = { formula: `SUM(${c}6:${c}${4 + kr.length})`, result: x.net }; row.getCell(2 + i).numFmt = NUM; }); total(row, 1, 1 + allc.length);
@@ -227,13 +227,13 @@
         linked ? { formula: `SUMIFS(${rcR('L')},${rcR('A')},A${n},${rcR('B')},D${n})`, result: u } : u, { formula: `L${n}*H${n}`, result: s.cogs }, type, s.file || '', s.qty, note]);
       row.getCell(6).numFmt = NUM; row.getCell(7).numFmt = NUM2; row.getCell(8).numFmt = NUM2; row.getCell(9).numFmt = NUM2; row.getCell(12).numFmt = NUM;
     });
-    head(wsS.getRow(1), 1, 13); wsS.autoFilter = { from: 'A1', to: `M${nS}` };
+    head(wsS.getRow(1), 1, 13); wsS.getRow(1).height = 32; wsS.autoFilter = { from: 'A1', to: `M${nS}` };
 
     /* ---------- ข้อมูลค่าใช้จ่าย ---------- */
     const wsX = wb.addWorksheet(X, { views: [{ state: 'frozen', ySplit: 1 }] });
     wsX.columns = [{ header: 'เดือน', width: 10 }, { header: 'ช่องทาง', width: 14 }, { header: 'ลักษณะ', width: 10 }, { header: 'กลุ่ม CJ', width: 10 }, { header: 'หมวดในไฟล์', width: 30 }, { header: 'รายการ', width: 46 }, { header: 'จำนวนเงินไม่รวม VAT', width: 18 }, { header: 'ใช้ในแบบ', width: 12 }, { header: 'ที่มา', width: 16 }, { header: 'ไฟล์ที่มา', width: 40 }, { header: 'กลุ่มหลัก', width: 24 }, { header: 'หมวดย่อย', width: 32 }, { header: 'ปันส่วนกลาง', width: 14 }, { header: 'เลขที่ใบขายอ้างอิง', width: 18 }];
     exps.forEach(e => { const row = wsX.addRow([e.month, e.channel, e.nat, e.group, e.category, e.name, e.amount, e.use, e.source, e.file, e.main, e.sub, e.pool, e.doc]); row.getCell(7).numFmt = NUM2; });
-    head(wsX.getRow(1), 1, 14); wsX.autoFilter = { from: 'A1', to: `N${nX}` };
+    head(wsX.getRow(1), 1, 14); wsX.getRow(1).height = 32; wsX.autoFilter = { from: 'A1', to: `N${nX}` };
     wsX.getColumn(13).eachCell((c, n) => { if (n > 1 && c.value) c.dataValidation = { type: 'list', allowBlank: true, formulae: [`"${POOL.all},${POOL.noCJ}"`] }; });
 
     /* ---------- ข้อมูลซื้อ ---------- */

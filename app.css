@@ -164,3 +164,6 @@ details>.card{border-top:1px solid var(--line);margin-bottom:0}
 /* ตารางค่าใช้จ่ายตามกลุ่มหลัก */
 tr.grp td{font-weight:600;color:#0e5e6f;background:#eef7f8}
 td.ind{padding-left:22px}
+
+/* คำเตือนเฉพาะช่องทาง (แสดงในมุมมองผู้บริหารด้วย) */
+.warnline{margin:10px 0 0;font-size:13px;color:#b4501b}
