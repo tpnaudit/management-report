@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e5e6f">
+<title>Management Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Kanit:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="t">Management Report</div>
+    <div class="s" id="range">รายงานผลดำเนินงานรายเดือน</div>
+  </div>
+  <div class="ctl">
+    <label class="fld">เดือนที่ดู <select id="month"></select></label>
+    <div class="fld">ค่าโปร 1 แถม 1 คิดแบบ
+      <button type="button" class="tip lt" data-tip="mode" aria-label="คำอธิบาย">i</button>
+      <div class="seg" id="mode" role="group" aria-label="วิธีรับรู้ค่าโปร 1 แถม 1">
+        <button data-mode="accrual">ตั้งประมาณการต่อถุง</button>
+        <button data-mode="actual">ตามบิล CJ จริง</button>
+      </div>
+    </div>
+    <label class="fld chk"><input type="checkbox" id="present"> Present <button type="button" class="tip lt" data-tip="present" aria-label="คำอธิบาย">i</button></label>
+    <button type="button" class="btn lite office" id="btnExport">Export Excel</button>
+  </div>
+</header>
+<nav class="tabs" id="tabs" aria-label="หน้า">
+  <button data-tab="trend">แนวโน้ม</button>
+  <button data-tab="overview">ภาพรวมเดือน</button>
+  <button data-tab="cj">กำไร CJ</button>
+  <button data-tab="promo">รอบโปร</button>
+  <button data-tab="price">ตั้งราคา CJ</button>
+  <button data-tab="be">จุดคุ้มทุน</button>
+  <button data-tab="ch">ช่องทางอื่น</button>
+  <button data-tab="cash">เงินสด</button>
+  <button data-tab="sku">สินค้า</button>
+  <button data-tab="import">นำเข้าและจับคู่</button>
+</nav>
+<main id="view"></main>
+<div id="tipbox" role="tooltip" hidden></div>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/exceljs.min.js"></script>
+<script src="importer.js"></script>
+<script src="engine.js"></script>
+<script src="client-config.js" onerror="void 0"></script>
+<script src="tips.js"></script>
+<script src="export.js"></script>
+<script src="data.enc.js" onerror="void 0"></script>
+<script src="app.js"></script>
+</body>
+</html>
