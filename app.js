@@ -20,7 +20,7 @@
     Object.keys(cl).forEach(k => { d[k] = (d[k] && typeof d[k] === 'object' && !Array.isArray(d[k])) ? Object.assign(d[k], cl[k]) : cl[k]; });
     let srev = 0; try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) srev = s.rev || 0; if (s) Object.keys(d).forEach(k => { if (s[k] != null) d[k] = (typeof d[k] === 'object' && !Array.isArray(d[k])) ? Object.assign(d[k], s[k]) : s[k]; }); } catch (e) { /* ใช้ค่าเริ่มต้น */ }
     // ไฟล์ค่าเฉพาะกิจการมี rev ใหม่กว่าที่บันทึกไว้: ใช้ตารางจับคู่และกฎจากไฟล์นั้นทับ 1 ครั้ง
-    if (cl.rev && srev !== cl.rev) { ['channelMap', 'prefixMap'].forEach(k => Object.assign(d[k], cl[k] || {})); ['channelRules', 'noCJ', 'excludeWords', 'purchaseFeeSkus', 'partialWords', 'purchaseMonth'].forEach(k => { if (cl[k]) d[k] = cl[k]; }); d.rev = cl.rev; }
+    if (cl.rev && srev !== cl.rev) { ['channelMap', 'prefixMap'].forEach(k => Object.assign(d[k], cl[k] || {})); ['channelRules', 'noCJ', 'excludeWords', 'purchaseFeeSkus', 'partialWords', 'purchaseMonth', 'monthSource'].forEach(k => { if (cl[k]) d[k] = cl[k]; }); d.rev = cl.rev; }
     return d;
   }
   function saveCfg() { try { localStorage.setItem(hosted ? hostKey : KEY, JSON.stringify(cfg)); } catch (e) { /* เก็บไม่ได้ก็ยังใช้งานต่อได้ */ } }

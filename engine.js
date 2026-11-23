@@ -18,6 +18,7 @@
     noCJ: [],                  // คำในชื่อรายการ/หมวด ของค่าใช้จ่ายส่วนกลางที่ไม่ปันให้ CJ (ปันเฉพาะช่องทางอื่น)
     excludeWords: [],          // คำในชื่อรายการ/หมวด ที่ไม่นับในกำไรขาดทุน
     catGroup: {},              // หมวดในไฟล์ → "กลุ่มหลัก|หมวดย่อย" ที่ตั้งเอง
+    monthSource: {},           // เดือนที่มีไฟล์ export ชุดสมบูรณ์ล่าสุด { 'YYYY-MM': 'คำในชื่อไฟล์' } ใช้ไฟล์นั้นแทนไฟล์รุ่นเก่าของเดือนนั้น
     purchaseMonth: {},         // ใบซื้อที่ของเข้าคลังคนละเดือนกับวันที่ใบซื้อ { เลขที่ใบซื้อ: 'YYYY-MM' } ใช้ในการคำนวณต้นทุน
     partialWords: [],          // รายการที่นับเป็นค่าใช้จ่ายบางส่วน { word, pct, sub } เช่น เงินสมทบประกันสังคม นับเฉพาะส่วนนายจ้าง
     purchaseFeeSkus: [],       // รหัสในใบซื้อที่เป็นค่าธรรมเนียม ไม่ใช่สินค้า (นำไปปันเข้าต้นทุนสินค้าในใบเดียวกัน)
@@ -89,11 +90,17 @@
     const isExportName = n => /^[A-Za-z]+_\d{10,}_\w+\.xlsx/i.test(n);
     const rank = f => (f.hasMap ? 2 : 0) + (isExportName(f.file.split('/').pop()) ? 0 : 1);
     const order = kind => files.filter(f => f.used && f.kind === kind).sort((a, b) => rank(b) - rank(a));
+    // เดือนที่กำหนดแหล่งหลักไว้: รายการของเดือนนั้นจากไฟล์อื่นไม่ใช้ (ไฟล์ export ใหม่ที่ลูกค้าคีย์ตามหลักแล้วแทนไฟล์รุ่นเก่า)
+    const msrc = cfg.monthSource || {};
+    const isSrc = (f, m) => !msrc[m] || f.name.indexOf(msrc[m]) >= 0;
+    const docMonth = {}; files.forEach(f => { if (f.used && (f.kind === 'sales' || f.kind === 'purchases')) f.lines.forEach(l => { if (l.doc && l.month && !docMonth[l.doc]) docMonth[l.doc] = l.month; }); });
+    const lineMonth = l => l.month || docMonth[l.doc] || '';
     const take = (kind, keyOf, byDoc) => {
       const owner = new Map(), out = [];
       order(kind).forEach(f => {
-        const cnt = {}; let kept = 0; const from = {};
+        const cnt = {}; let kept = 0; const from = {}; let replaced = 0;
         f.lines.forEach(l => {
+          const lm = lineMonth(l); if (lm && !isSrc(f, lm)) { replaced++; return; }
           let k = keyOf(l);
           if (!byDoc) { cnt[k] = (cnt[k] || 0) + 1; k += '#' + cnt[k]; } // รายการเหมือนกันในไฟล์เดียวกันไม่ถือว่าซ้ำ
           const o = owner.get(k);
@@ -101,15 +108,16 @@
           owner.set(k, f); l.file = f.name; out.push(l); kept++;
         });
         f.kept = kept;
-        const skipped = f.lines.length - kept, src = Object.keys(from).join(', ');
-        if (!kept && f.lines.length) { f.dup = src; f.dupNote = `ซ้ำกับ ${src} ทั้งไฟล์ ใช้ไฟล์นั้นแทน`; }
-        else if (skipped) f.dupNote = `ใช้ ${kept} บรรทัด · อีก ${skipped} บรรทัดซ้ำกับ ${src}`;
+        const skipped = f.lines.length - kept - replaced, src = Object.keys(from).join(', ');
+        const rep = replaced ? `${replaced} บรรทัดเป็นเดือนที่ใช้ไฟล์ export ชุดใหม่แทน` : '';
+        if (!kept && f.lines.length) { f.dup = src || 'ไฟล์ export ชุดใหม่'; f.dupNote = (src ? `ซ้ำกับ ${src}` : '') + (src && rep ? ' · ' : '') + (rep ? rep : ' ทั้งไฟล์ ใช้ไฟล์นั้นแทน'); }
+        else if (skipped || replaced) f.dupNote = `ใช้ ${kept} บรรทัด` + (skipped ? ` · อีก ${skipped} บรรทัดซ้ำกับ ${src}` : '') + (rep ? ' · ' + rep : '');
       });
       return out;
     };
     // เอกสารที่ถูกยกเลิกในไฟล์รุ่นใดรุ่นหนึ่ง ถือว่ายกเลิก (ไฟล์ที่ export ทีหลังอาจยกเลิกเพิ่มจากไฟล์ที่ลูกค้าส่งมาก่อน)
     const cancelMap = new Map();
-    order('sales').forEach(f => (f.cancelledDocs || []).forEach(c => { if (!cancelMap.has(c.doc)) cancelMap.set(c.doc, Object.assign({ file: f.name }, c)); }));
+    order('sales').forEach(f => (f.cancelledDocs || []).forEach(c => { if (isSrc(f, c.month) && !cancelMap.has(c.doc)) cancelMap.set(c.doc, Object.assign({ file: f.name }, c)); }));
     const saleLines = take('sales', l => l.doc, true).filter(l => !cancelMap.has(l.doc)).concat(take('returns', l => l.doc, true));
     const expLines = take('expenses', l => l.month + '|' + l.name + '|' + l.amount.toFixed(2));
     const ordLines = take('orderExp', l => l.doc + '|' + l.name + '|' + l.amount.toFixed(2));
@@ -141,7 +149,7 @@
     });
     // เดือนที่สำนักงานยังไม่ได้ทำตารางต้นทุน แต่มีรายงานสินค้าเคลื่อนไหว: คำนวณต้นทุนถัวเฉลี่ยของงวดเอง
     // ยอดยกมา (ปลายงวดก่อน) + ซื้อเข้ารวมค่าใช้จ่าย = พร้อมขาย → ต้นทุนถัวเฉลี่ย → หักคงเหลือสิ้นเดือน = จำนวนขาย/ปรับปรุง
-    const mv = {}; live('movement').forEach(f => { if (!f.month) return; mv[f.month] = mv[f.month] || { file: f.name, rows: {} }; f.lines.forEach(l => { mv[f.month].rows[l.sku || l.name] = l; }); });
+    const mv = {}; live('movement').forEach(f => { if (!f.month || !isSrc(f, f.month)) return; mv[f.month] = mv[f.month] || { file: f.name, rows: {} }; f.lines.forEach(l => { mv[f.month].rows[l.sku || l.name] = l; }); });
     const prevM = m => { const d = new Date(+m.slice(0, 4), +m.slice(5) - 2, 15); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
     Object.keys(mv).sort().forEach(m => {
       const prev = recon[prevM(m)]; if (office[m] || !prev) return;
@@ -213,7 +221,7 @@
     const cnt = {}; sales.forEach(s => { if (!s.ret) cnt[s.month] = (cnt[s.month] || 0) + 1; });
     const months = Object.keys(cnt).filter(Boolean).sort();
     const summary = {}, detailValue = {};
-    live('salesSummary').forEach(f => Object.keys(f.byMonth).forEach(m => { summary[m] = (summary[m] || 0) + f.byMonth[m]; }));
+    live('salesSummary').forEach(f => Object.keys(f.byMonth).forEach(m => { if (!isSrc(f, m)) return; summary[m] = (summary[m] || 0) + f.byMonth[m]; }));
     live('sales').forEach(f => { if (f.kept === f.lines.length) Object.keys(f.valueByMonth).forEach(m => { detailValue[m] = (detailValue[m] || 0) + f.valueByMonth[m]; }); });
     live('returns').forEach(f => { if (f.kept === f.lines.length) Object.keys(f.valueByMonth).forEach(m => { detailValue[m] = (detailValue[m] || 0) - f.valueByMonth[m]; }); });
     const noCostOut = {}; Object.keys(noCost).forEach(m => { noCostOut[m] = [...noCost[m]]; });
