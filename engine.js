@@ -18,6 +18,8 @@
     noCJ: [],                  // คำในชื่อรายการ/หมวด ของค่าใช้จ่ายส่วนกลางที่ไม่ปันให้ CJ (ปันเฉพาะช่องทางอื่น)
     excludeWords: [],          // คำในชื่อรายการ/หมวด ที่ไม่นับในกำไรขาดทุน
     catGroup: {},              // หมวดในไฟล์ → "กลุ่มหลัก|หมวดย่อย" ที่ตั้งเอง
+    purchaseMonth: {},         // ใบซื้อที่ของเข้าคลังคนละเดือนกับวันที่ใบซื้อ { เลขที่ใบซื้อ: 'YYYY-MM' } ใช้ในการคำนวณต้นทุน
+    partialWords: [],          // รายการที่นับเป็นค่าใช้จ่ายบางส่วน { word, pct, sub } เช่น เงินสมทบประกันสังคม นับเฉพาะส่วนนายจ้าง
     purchaseFeeSkus: [],       // รหัสในใบซื้อที่เป็นค่าธรรมเนียม ไม่ใช่สินค้า (นำไปปันเข้าต้นทุนสินค้าในใบเดียวกัน)
     rev: 0,
     fc: {}                     // สมมติฐานประมาณการเงินสดที่แก้เอง { open, cjSales, otherSales, buy, exp, promo }
@@ -39,11 +41,12 @@
     [G_SELL, SHIP_SUB, /ขนส่ง|J&T|ลงสินค้า|ค่าตัก|กระจายสินค้า|DC\s*fee|น้ำมัน/i],
     [G_SELL, 'การตลาดและโฆษณา', /โฆษณา|การตลาด|marketing|\bads\b|คลิป|ไลฟ์|ออกบูธ|ไวนิล|ออกแบบ|ส่งเสริมการขาย|ของแถม|ตัวอย่าง|influencer|รีวิว|boost|meta/i],
     [G_SELL, 'ค่าคอมมิชชั่นและค่าธรรมเนียมการขาย', /คอมมิชชั่น|ค่าธรรมเนียม/],
-    [G_COST, 'ค่าบรรจุภัณฑ์', /บรรจุภัณฑ์|packag/i],
+    [G_SELL, 'ค่าบรรจุภัณฑ์', /บรรจุภัณฑ์|packag/i],
     [G_COST, 'ค่าเช่าและค่าใช้จ่ายโกดัง', /โกดัง|คลังสินค้า/],
     [G_COST, 'ค่าทดสอบคุณภาพสินค้า', /ทดสอบคุณภาพ|ตรวจแลป/],
     [G_STAFF, 'เงินเดือนกรรมการ', /เงินเดือนกรรมการ/],
     [G_STAFF, 'เงินเดือนและค่าจ้าง', /เงินเดือน|ค่าจ้าง|รายวัน|เบี้ยเลี้ยง|โบนัส/],
+    [G_STAFF, 'เงินสมทบประกันสังคม (ส่วนนายจ้าง)', /ประกันสังคม/],
     [G_STAFF, 'สวัสดิการและอบรม', /สวัสดิการ|อบรม/],
     [G_ADMIN, 'ค่าซอฟต์แวร์และระบบ', /ระบบ|ซอร์ฟแวร์|ซอฟต์แวร์|software/i],
     [G_ADMIN, 'ค่าทำบัญชีและที่ปรึกษา', /บัญชี|ที่ปรึกษา|กฎหมาย/],
@@ -133,7 +136,8 @@
       const goods = p.items.filter(i => !feeSkus.includes(i.sku)), fee = p.items.filter(i => feeSkus.includes(i.sku)).reduce((t, i) => t + i.total, 0);
       const gsum = goods.reduce((t, i) => t + i.total, 0), f = gsum && p.preVat ? (p.preVat - fee) / gsum : 1;
       const exp = fee + purchaseExp.filter(x => x.doc === p.doc).reduce((t, x) => t + x.amount, 0);
-      goods.forEach(i => buyLines.push({ month: p.month, doc: p.doc, sku: i.sku || i.name, name: i.name, qty: i.qty, val: i.total * f, alloc: gsum ? exp * i.total / gsum : 0, file: p.file }));
+      const bm = (cfg.purchaseMonth || {})[p.doc] || p.month;
+      goods.forEach(i => buyLines.push({ month: bm, docMonth: p.month, doc: p.doc, sku: i.sku || i.name, name: i.name, qty: i.qty, val: i.total * f, alloc: gsum ? exp * i.total / gsum : 0, file: p.file }));
     });
     // เดือนที่สำนักงานยังไม่ได้ทำตารางต้นทุน แต่มีรายงานสินค้าเคลื่อนไหว: คำนวณต้นทุนถัวเฉลี่ยของงวดเอง
     // ยอดยกมา (ปลายงวดก่อน) + ซื้อเข้ารวมค่าใช้จ่าย = พร้อมขาย → ต้นทุนถัวเฉลี่ย → หักคงเหลือสิ้นเดือน = จำนวนขาย/ปรับปรุง
@@ -181,8 +185,12 @@
       let nature = cfg.catNature[e.category] || e.hint || (e.prefix === 'FC' ? 'fix' : guessNature(e.category));
       const text = e.category + ' ' + e.name;
       if (channel === EXCLUDE || (!cfg.catNature[e.category] && (EX_RE.test(e.category) || (cfg.excludeWords || []).some(w => w && text.indexOf(w) >= 0)))) nature = 'ex';   // ภาษี สินทรัพย์ และคำที่ตั้งไว้ ไม่นับ แม้ไฟล์จะระบุลักษณะต้นทุนมา
+      // รายการที่นับเป็นค่าใช้จ่ายเพียงบางส่วน (เช่น เงินสมทบประกันสังคมที่จ่ายรวมส่วนลูกจ้าง)
+      const part = nature !== 'ex' ? (cfg.partialWords || []).find(x => x.word && text.indexOf(x.word) >= 0) : null;
+      let amount = e.amount, partNote = '';
+      if (part) { amount = e.amount * (+part.pct || 0) / 100; partNote = ` (นับ ${part.pct}% จาก ${e.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })})`; nature = 'fix'; }
       const g = groupOf(e.category, e.name, nature, cfg, channel);
-      expenses.push({ file: e.file, month: e.month, channel, nature, category: e.category, name: e.name, amount: e.amount, source: e.source, payDate: e.payDate, payStatus: e.payStatus,
+      expenses.push({ file: e.file, month: e.month, channel, nature, category: e.category, name: e.name + partNote, amount, fullAmount: e.amount, source: e.source, payDate: e.payDate, payStatus: e.payStatus,
         main: g.main, sub: g.sub, pool: channel === SHARED ? ((cfg.noCJ || []).some(w => w && text.indexOf(w) >= 0) ? 'noCJ' : 'all') : '',
         cjType: channel === 'CJ' ? classifyCJ(e.name + ' ' + e.category) : '' });
     });
